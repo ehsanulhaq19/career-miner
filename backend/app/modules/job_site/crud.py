@@ -74,7 +74,7 @@ async def delete_job_site(db: AsyncSession, job_site_id: int) -> bool:
 
 async def get_active_job_sites_for_scraping(db: AsyncSession) -> list[JobSite]:
     """Retrieve active job sites whose scrap_duration has elapsed since last_scrapped."""
-    now = datetime.now(timezone.utc)
+    now = (datetime.now(timezone.utc)).replace(tzinfo=None)
 
     result = await db.execute(select(JobSite).where(JobSite.is_active == True))
     sites = list(result.scalars().all())
@@ -84,7 +84,8 @@ async def get_active_job_sites_for_scraping(db: AsyncSession) -> list[JobSite]:
         if site.last_scrapped is None:
             eligible.append(site)
         else:
-            elapsed = now - site.last_scrapped.replace(tzinfo=timezone.utc)
+            last = site.last_scrapped.replace(tzinfo=None) if site.last_scrapped.tzinfo else site.last_scrapped
+            elapsed = now - last
             if elapsed >= timedelta(minutes=site.scrap_duration):
                 eligible.append(site)
 

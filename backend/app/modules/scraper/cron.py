@@ -39,7 +39,7 @@ async def _terminate_timed_out_jobs(db) -> None:
     for job in timed_out_jobs:
         logger.warning("Terminating timed-out scrap job %d", job.id)
         await update_scrap_job_status(db, job.id, "terminated")
-        await update_last_scrapped(db, job.job_site_id, datetime.now(timezone.utc))
+        await update_last_scrapped(db, job.job_site_id, datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 async def _process_eligible_sites(db) -> None:
@@ -69,7 +69,7 @@ async def _process_eligible_sites(db) -> None:
             job_site.name,
         )
         await scraper.scrape_job_site(db, job_site, scrap_job)
-        await update_last_scrapped(db, job_site.id, datetime.now(timezone.utc))
+        await update_last_scrapped(db, job_site.id, datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 def start_scheduler() -> None:

@@ -83,7 +83,7 @@ async def get_active_scrap_jobs_for_site(
 
 async def get_timed_out_scrap_jobs(db: AsyncSession, max_minutes: int) -> list[ScrapJob]:
     """Return scrap jobs that are pending or in_progress and exceeded the time limit."""
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_minutes)
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_minutes)).replace(tzinfo=None)
     result = await db.execute(
         select(ScrapJob).where(
             ScrapJob.status.in_(["pending", "in_progress"]),
