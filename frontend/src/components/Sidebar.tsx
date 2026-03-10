@@ -6,6 +6,7 @@ import {
   HiOutlineHome,
   HiOutlineGlobeAlt,
   HiOutlineBriefcase,
+  HiOutlineCpuChip,
   HiOutlineUser,
   HiOutlineArrowRightOnRectangle,
 } from "react-icons/hi2";
@@ -15,6 +16,7 @@ import { logoutUser } from "@/store/slices/authSlice";
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: HiOutlineHome },
   { label: "Job Sites", href: "/job-sites", icon: HiOutlineGlobeAlt },
+  { label: "Scrap Jobs", href: "/scrap-jobs", icon: HiOutlineCpuChip },
   { label: "Jobs", href: "/jobs", icon: HiOutlineBriefcase },
   { label: "Profile", href: "/profile", icon: HiOutlineUser },
 ];

@@ -40,7 +40,7 @@ async def get_career_jobs(
 async def get_career_job_by_id(db: AsyncSession, career_job_id: int) -> CareerJob | None:
     """Retrieve a single career job by its primary key."""
     result = await db.execute(select(CareerJob).where(CareerJob.id == career_job_id))
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def create_career_job(db: AsyncSession, data: dict) -> CareerJob:
@@ -72,7 +72,7 @@ async def check_duplicate_job(
         query = query.where(CareerJob.description == description)
 
     result = await db.execute(query)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_total_career_jobs_count(db: AsyncSession) -> int:

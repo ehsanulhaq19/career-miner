@@ -11,7 +11,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
-    MAX_SCRAP_EXECUTION_TIME_MINUTES: int = 30
+    MAX_SCRAP_EXECUTION_TIME_MINUTES: int = 100
+    MAX_PAGES_PER_SCRAP: int = 100
+    CRAWL_DELAY_MIN_SECONDS: float = 0.5
+    CRAWL_DELAY_MAX_SECONDS: float = 2.0
+    SCRAP_HTTP_PROXY: str | None = None
     APP_NAME: str = "CareerMiner"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

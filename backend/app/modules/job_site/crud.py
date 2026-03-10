@@ -34,7 +34,7 @@ async def get_job_sites(
 async def get_job_site_by_id(db: AsyncSession, job_site_id: int) -> JobSite | None:
     """Retrieve a single job site by its primary key."""
     result = await db.execute(select(JobSite).where(JobSite.id == job_site_id))
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def create_job_site(db: AsyncSession, data: dict) -> JobSite:

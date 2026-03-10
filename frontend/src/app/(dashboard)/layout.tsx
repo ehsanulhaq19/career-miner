@@ -7,6 +7,7 @@ import { fetchCurrentUser } from "@/store/slices/authSlice";
 import Sidebar from "@/components/Sidebar";
 import Navbar from "@/components/Navbar";
 import Loader from "@/components/Loader";
+import WebSocketProvider from "@/components/WebSocketProvider";
 
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -35,12 +36,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Navbar />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+    <WebSocketProvider>
+      <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
+        <Sidebar />
+        <div className="flex-1 flex flex-col min-w-0">
+          <Navbar />
+          <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </WebSocketProvider>
   );
 }

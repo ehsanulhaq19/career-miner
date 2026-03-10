@@ -5,6 +5,7 @@ import themeReducer from "./slices/themeSlice";
 import jobSiteReducer from "./slices/jobSiteSlice";
 import careerJobReducer from "./slices/careerJobSlice";
 import dashboardReducer from "./slices/dashboardSlice";
+import scrapJobReducer from "./slices/scrapJobSlice";
 
 export const store = configureStore({
   reducer: {
@@ -13,6 +14,7 @@ export const store = configureStore({
     jobSite: jobSiteReducer,
     careerJob: careerJobReducer,
     dashboard: dashboardReducer,
+    scrapJob: scrapJobReducer,
   },
 });
 

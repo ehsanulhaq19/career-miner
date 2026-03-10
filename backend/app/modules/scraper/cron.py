@@ -12,6 +12,9 @@ from app.modules.scrap_job.crud import (
     get_timed_out_scrap_jobs,
     update_scrap_job_status,
 )
+from app.modules.scrap_job.models import ScrapJobStatus
+from app.modules.scrap_job.schemas import ScrapJobResponse
+from app.modules.websocket.service import broadcast_scrap_job_status
 from app.modules.scraper.service import ScraperService
 
 logger = logging.getLogger(__name__)
@@ -38,7 +41,12 @@ async def _terminate_timed_out_jobs(db) -> None:
     )
     for job in timed_out_jobs:
         logger.warning("Terminating timed-out scrap job %d", job.id)
-        await update_scrap_job_status(db, job.id, "terminated")
+        updated = await update_scrap_job_status(db, job.id, ScrapJobStatus.TERMINATED)
+        if updated:
+            await broadcast_scrap_job_status(
+                ScrapJobResponse.model_validate(updated).model_dump(),
+                ScrapJobStatus.TERMINATED.value,
+            )
         await update_last_scrapped(db, job.job_site_id, datetime.now(timezone.utc).replace(tzinfo=None))
 
 
@@ -60,7 +68,7 @@ async def _process_eligible_sites(db) -> None:
             {
                 "name": f"job_{int(datetime.now(timezone.utc).timestamp())}",
                 "job_site_id": job_site.id,
-                "status": "pending",
+                "status": ScrapJobStatus.PENDING.value,
             },
         )
         logger.info(

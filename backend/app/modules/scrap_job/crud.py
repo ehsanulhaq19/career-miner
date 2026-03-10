@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.scrap_job.models import ScrapJob
+from app.modules.scrap_job.models import ScrapJob, ScrapJobStatus
 
 
 async def get_scrap_jobs(
@@ -39,7 +39,7 @@ async def get_scrap_jobs(
 async def get_scrap_job_by_id(db: AsyncSession, scrap_job_id: int) -> ScrapJob | None:
     """Retrieve a single scrap job by its primary key."""
     result = await db.execute(select(ScrapJob).where(ScrapJob.id == scrap_job_id))
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def create_scrap_job(db: AsyncSession, data: dict) -> ScrapJob:
@@ -54,14 +54,15 @@ async def create_scrap_job(db: AsyncSession, data: dict) -> ScrapJob:
 async def update_scrap_job_status(
     db: AsyncSession,
     scrap_job_id: int,
-    status: str,
+    status: str | ScrapJobStatus,
 ) -> ScrapJob | None:
     """Update the status of an existing scrap job."""
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job is None:
         return None
 
-    scrap_job.status = status
+    status_value = status.value if isinstance(status, ScrapJobStatus) else status
+    scrap_job.status = status_value
     await db.flush()
     await db.refresh(scrap_job)
     return scrap_job
@@ -75,7 +76,9 @@ async def get_active_scrap_jobs_for_site(
     result = await db.execute(
         select(ScrapJob).where(
             ScrapJob.job_site_id == job_site_id,
-            ScrapJob.status.in_(["pending", "in_progress"]),
+            ScrapJob.status.in_(
+                [ScrapJobStatus.PENDING.value, ScrapJobStatus.IN_PROGRESS.value]
+            ),
         )
     )
     return list(result.scalars().all())
@@ -86,7 +89,9 @@ async def get_timed_out_scrap_jobs(db: AsyncSession, max_minutes: int) -> list[S
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_minutes)).replace(tzinfo=None)
     result = await db.execute(
         select(ScrapJob).where(
-            ScrapJob.status.in_(["pending", "in_progress"]),
+            ScrapJob.status.in_(
+                [ScrapJobStatus.PENDING.value, ScrapJobStatus.IN_PROGRESS.value]
+            ),
             ScrapJob.created_at <= cutoff,
         )
     )

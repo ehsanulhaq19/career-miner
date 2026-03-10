@@ -7,13 +7,13 @@ from app.modules.auth.models import User
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     """Retrieve a user by their email address."""
     result = await db.execute(select(User).where(User.email == email))
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
     """Retrieve a user by their primary key ID."""
     result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def create_user(db: AsyncSession, user_data: dict) -> User:

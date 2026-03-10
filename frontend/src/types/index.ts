@@ -37,7 +37,13 @@ export interface ScrapJob {
   id: number;
   name: string;
   job_site_id: number;
-  status: "pending" | "in_progress" | "completed" | "error" | "terminated";
+  status:
+    | "pending"
+    | "in_progress"
+    | "completed"
+    | "error"
+    | "terminated"
+    | "stopped";
   created_at: string;
   updated_at: string;
 }

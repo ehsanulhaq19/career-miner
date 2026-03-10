@@ -3,6 +3,12 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class ScrapJobStartRequest(BaseModel):
+    """Schema for starting a new scrap job."""
+
+    job_site_id: int
+
+
 class ScrapJobResponse(BaseModel):
     """Schema for scrap job response data."""
 
