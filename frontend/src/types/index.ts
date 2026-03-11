@@ -47,6 +47,7 @@ export interface CareerJob {
   created_at: string;
   updated_at: string;
   job_site_name?: string;
+  job_seen?: boolean;
 }
 
 export interface ScrapJob {
@@ -64,10 +65,22 @@ export interface ScrapJob {
   updated_at: string;
 }
 
+export interface CareerClient {
+  id: number;
+  emails: string[];
+  name: string | null;
+  location: string | null;
+  detail: string | null;
+  link: string | null;
+  size: string | null;
+  created_at: string;
+}
+
 export interface DashboardStats {
   total_jobs_executed: number;
   total_job_records: number;
   total_job_sites: number;
+  total_clients: number;
   job_site_cards: JobSiteCard[];
 }
 

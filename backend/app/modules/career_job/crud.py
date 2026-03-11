@@ -1,9 +1,70 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.career_job.models import CareerJob
+from app.modules.career_client.models import CareerClient
+from app.modules.career_job.models import CareerJob, CareerJobUser
 from app.modules.job_site.models import JobSite
 from app.modules.scrap_job.models import ScrapJob
+
+
+async def get_career_job_user(
+    db: AsyncSession, career_job_id: int, user_id: int
+) -> CareerJobUser | None:
+    """Retrieve a career job user record by career job id and user id."""
+    result = await db.execute(
+        select(CareerJobUser).where(
+            CareerJobUser.career_job_id == career_job_id,
+            CareerJobUser.user_id == user_id,
+        )
+    )
+    return result.scalars().first()
+
+
+async def create_career_job_user(
+    db: AsyncSession, career_job_id: int, user_id: int
+) -> CareerJobUser:
+    """Create a new career job user record."""
+    career_job_user = CareerJobUser(career_job_id=career_job_id, user_id=user_id)
+    db.add(career_job_user)
+    await db.flush()
+    await db.refresh(career_job_user)
+    return career_job_user
+
+
+async def get_all_career_job_ids(db: AsyncSession) -> list[int]:
+    """Return list of all career job ids."""
+    result = await db.execute(select(CareerJob.id))
+    return list(result.scalars().all())
+
+
+async def mark_all_jobs_seen_for_user(
+    db: AsyncSession, user_id: int
+) -> int:
+    """Mark all career jobs as seen for the user. Returns count of newly created records."""
+    all_ids = await get_all_career_job_ids(db)
+    if not all_ids:
+        return 0
+    seen_ids = await get_seen_career_job_ids_from_list(db, user_id, all_ids)
+    to_create = [id_ for id_ in all_ids if id_ not in seen_ids]
+    for career_job_id in to_create:
+        await create_career_job_user(db, career_job_id, user_id)
+    return len(to_create)
+
+
+async def get_seen_career_job_ids_from_list(
+    db: AsyncSession, user_id: int, career_job_ids: list[int]
+) -> set[int]:
+    """Return set of career job ids from the given list that the user has seen."""
+    if not career_job_ids:
+        return set()
+    result = await db.execute(
+        select(CareerJobUser.career_job_id).where(
+            CareerJobUser.user_id == user_id,
+            CareerJobUser.career_job_id.in_(career_job_ids),
+        )
+    )
+    rows = result.scalars().all()
+    return set(rows)
 
 
 async def get_career_jobs(
@@ -13,6 +74,8 @@ async def get_career_jobs(
     job_site_id: int | None = None,
     category: str | None = None,
     search: str | None = None,
+    user_id: int | None = None,
+    show_unseen_jobs: bool = False,
 ) -> tuple[list[CareerJob], int]:
     """Retrieve a paginated list of career jobs with optional filters."""
     query = select(CareerJob)
@@ -25,6 +88,13 @@ async def get_career_jobs(
     if search is not None:
         query = query.where(CareerJob.title.ilike(f"%{search}%"))
         count_query = count_query.where(CareerJob.title.ilike(f"%{search}%"))
+
+    if show_unseen_jobs and user_id is not None:
+        subq = select(CareerJobUser.career_job_id).where(
+            CareerJobUser.user_id == user_id
+        )
+        query = query.where(CareerJob.id.not_in(subq))
+        count_query = count_query.where(CareerJob.id.not_in(subq))
 
     query = query.order_by(CareerJob.created_at.desc()).offset(skip).limit(limit)
 
@@ -122,8 +192,12 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
     site_count_result = await db.execute(select(func.count(JobSite.id)))
     total_job_sites = site_count_result.scalar() or 0
 
+    client_count_result = await db.execute(select(func.count(CareerClient.id)))
+    total_clients = client_count_result.scalar() or 0
+
     return {
         "total_jobs_executed": total_jobs_executed,
         "total_job_records": total_job_records,
         "total_job_sites": total_job_sites,
+        "total_clients": total_clients,
     }

@@ -11,6 +11,8 @@ import {
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchCareerJobs,
+  markAllJobsSeen,
+  markJobSeen,
   setFilters,
   clearFilters,
   setPage,
@@ -43,6 +45,7 @@ export default function JobsPage() {
         job_site_id: filters.job_site_id,
         category: filters.category,
         search: filters.search,
+        show_unseen_jobs: filters.show_unseen_jobs,
       })
     );
   }, [dispatch, page, limit, filters]);
@@ -69,14 +72,35 @@ export default function JobsPage() {
     dispatch(setPage(1));
   };
 
+  const handleShowUnseenToggle = (checked: boolean) => {
+    dispatch(setFilters({ show_unseen_jobs: checked || undefined }));
+    dispatch(setPage(1));
+  };
+
+  const handleJobClick = (job: CareerJob) => {
+    setSelectedJob(job);
+    if (!job.job_seen) {
+      dispatch(markJobSeen(job.id));
+    }
+  };
+
   const handleClearFilters = () => {
     setSearchInput("");
     dispatch(clearFilters());
     dispatch(setPage(1));
   };
 
+  const handleMarkAllSeen = () => {
+    dispatch(markAllJobsSeen());
+  };
+
   const totalPages = Math.ceil(total / limit);
-  const hasFilters = filters.search || filters.job_site_id || filters.category;
+  const hasUnseenJobs = items.some((job) => !job.job_seen);
+  const hasFilters =
+    filters.search ||
+    filters.job_site_id ||
+    filters.category ||
+    filters.show_unseen_jobs;
 
   return (
     <div className="space-y-6">
@@ -111,6 +135,25 @@ export default function JobsPage() {
             placeholder="Category"
             className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors sm:w-40"
           />
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filters.show_unseen_jobs ?? false}
+              onChange={(e) => handleShowUnseenToggle(e.target.checked)}
+              className="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+            />
+            <span className="text-sm text-gray-700 dark:text-gray-300">
+              Show unseen only
+            </span>
+          </label>
+          {hasUnseenJobs && items.length > 0 && (
+            <button
+              onClick={handleMarkAllSeen}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 transition-colors"
+            >
+              Mark all as seen
+            </button>
+          )}
           {hasFilters && (
             <button
               onClick={handleClearFilters}
@@ -159,10 +202,13 @@ export default function JobsPage() {
             {items.map((job) => (
               <button
                 key={job.id}
-                onClick={() => setSelectedJob(job)}
-                className="text-left bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-5 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-md transition-all"
+                onClick={() => handleJobClick(job)}
+                className="text-left bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-5 hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-md transition-all relative"
               >
-                <h3 className="font-semibold text-gray-900 dark:text-white line-clamp-1 mb-2">
+                {!job.job_seen && (
+                  <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-primary-500" />
+                )}
+                <h3 className="font-semibold text-gray-900 dark:text-white line-clamp-1 mb-2 pr-4">
                   {job.title}
                 </h3>
                 {job.description && (

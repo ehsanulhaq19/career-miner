@@ -2,10 +2,38 @@ import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
 import { careerJobService } from "@/services/careerJobService";
 import { CareerJob } from "@/types";
 
+export const markJobSeen = createAsyncThunk(
+  "careerJob/markSeen",
+  async (careerJobId: number, { rejectWithValue }) => {
+    try {
+      await careerJobService.markJobSeen(careerJobId);
+      return careerJobId;
+    } catch (error: any) {
+      return rejectWithValue(
+        error.response?.data?.detail || "Failed to mark job as seen"
+      );
+    }
+  }
+);
+
+export const markAllJobsSeen = createAsyncThunk(
+  "careerJob/markAllSeen",
+  async (_, { rejectWithValue }) => {
+    try {
+      return await careerJobService.markAllJobsSeen();
+    } catch (error: any) {
+      return rejectWithValue(
+        error.response?.data?.detail || "Failed to mark all jobs as seen"
+      );
+    }
+  }
+);
+
 interface CareerJobFilters {
   job_site_id?: number;
   category?: string;
   search?: string;
+  show_unseen_jobs?: boolean;
 }
 
 interface CareerJobState {
@@ -27,7 +55,7 @@ const initialState: CareerJobState = {
   loading: false,
   error: null,
   current: null,
-  filters: {},
+  filters: { show_unseen_jobs: true },
 };
 
 export const fetchCareerJobs = createAsyncThunk(
@@ -82,6 +110,10 @@ const careerJobSlice = createSlice({
     setPage(state, action: PayloadAction<number>) {
       state.page = action.payload;
     },
+    setJobSeen(state, action: PayloadAction<number>) {
+      const job = state.items.find((j) => j.id === action.payload);
+      if (job) job.job_seen = true;
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -93,6 +125,7 @@ const careerJobSlice = createSlice({
         state.loading = false;
         state.items = action.payload.items;
         state.total = action.payload.total;
+        state.page = action.payload.page ?? state.page;
       })
       .addCase(fetchCareerJobs.rejected, (state, action) => {
         state.loading = false;
@@ -109,9 +142,19 @@ const careerJobSlice = createSlice({
       .addCase(fetchCareerJob.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
+      })
+      .addCase(markJobSeen.fulfilled, (state, action) => {
+        const job = state.items.find((j) => j.id === action.payload);
+        if (job) job.job_seen = true;
+      })
+      .addCase(markAllJobsSeen.fulfilled, (state) => {
+        state.items.forEach((job) => {
+          job.job_seen = true;
+        });
       });
   },
 });
 
-export const { setFilters, clearFilters, setPage } = careerJobSlice.actions;
+export const { setFilters, clearFilters, setPage, setJobSeen } =
+  careerJobSlice.actions;
 export default careerJobSlice.reducer;

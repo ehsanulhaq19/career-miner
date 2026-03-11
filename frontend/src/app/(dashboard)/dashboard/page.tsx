@@ -5,6 +5,7 @@ import {
   HiOutlineBriefcase,
   HiOutlineDocumentText,
   HiOutlineGlobeAlt,
+  HiOutlineUserGroup,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import { fetchDashboardStats } from "@/store/slices/dashboardSlice";
@@ -23,8 +24,8 @@ function timeAgo(date: string | null): string {
 
 function StatsSkeleton() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      {[...Array(3)].map((_, i) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {[...Array(4)].map((_, i) => (
         <div
           key={i}
           className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6"
@@ -88,11 +89,17 @@ export default function DashboardPage() {
       icon: HiOutlineGlobeAlt,
       accent: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30",
     },
+    {
+      label: "Total Clients",
+      value: stats?.total_clients ?? 0,
+      icon: HiOutlineUserGroup,
+      accent: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30",
+    },
   ];
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {statCards.map((card) => (
           <div
             key={card.label}

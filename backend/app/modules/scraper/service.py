@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup, Tag
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.modules.career_client.crud import get_or_create_career_client
 from app.modules.career_job.crud import (
     check_job_exists_by_title_and_links,
     create_career_job,
@@ -159,18 +160,27 @@ class ScraperService:
                 for job_data, parsed_data in zip(all_jobs, parsed_jobs_array):
                     links = job_data.get("links") or []
                     primary_url = parsed_data.get("job_link") or (links[0] if links else None)
-                    await create_career_job(
+                    career_client = await get_or_create_career_client(
                         db,
-                        {
-                            "title": job_data["title"],
-                            "description": job_data.get("description"),
-                            "url": primary_url,
-                            "job_site_id": job_site.id,
-                            "scrap_job_id": scrap_job.id,
-                            "parsed_data": parsed_data,
-                            "meta_data": {},
-                        },
+                        name=parsed_data.get("company_name"),
+                        link=parsed_data.get("company_link"),
+                        location=parsed_data.get("location"),
+                        emails=self._parse_emails(parsed_data.get("company_emails")),
+                        detail=job_data.get("description"),
+                        size=parsed_data.get("company_size"),
                     )
+                    career_job_data = {
+                        "title": job_data["title"],
+                        "description": job_data.get("description"),
+                        "url": primary_url,
+                        "job_site_id": job_site.id,
+                        "scrap_job_id": scrap_job.id,
+                        "parsed_data": parsed_data,
+                        "meta_data": {},
+                    }
+                    if career_client:
+                        career_job_data["career_client_id"] = career_client.id
+                    await create_career_job(db, career_job_data)
                     saved_count += 1
 
             logger.info(
@@ -267,6 +277,17 @@ class ScraperService:
                 logger.warning("LLM returned invalid JSON for chunk %d", i // chunk_size)
                 parsed_jobs_array.extend([{}] * len(chunk))
         return parsed_jobs_array[: len(jobs)]
+
+    def _parse_emails(self, value: str | list | None) -> list[str]:
+        """Parse company_emails from LLM response into a list of strings."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if v and str(v).strip()]
+        if isinstance(value, str):
+            parts = re.split(r"[,;\s]+", value)
+            return [p.strip() for p in parts if p and "@" in p]
+        return []
 
     def _job_matches_categories(
         self, job_data: dict, categories: list | None

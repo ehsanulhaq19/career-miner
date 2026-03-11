@@ -30,6 +30,7 @@ class CareerJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     job_site_name: str | None = None
+    job_seen: bool = False
 
 
 class CareerJobListResponse(BaseModel):
@@ -47,10 +48,17 @@ class CareerJobDetailResponse(CareerJobResponse):
     pass
 
 
+class MarkJobSeenRequest(BaseModel):
+    """Schema for marking a job as seen."""
+
+    career_job_id: int
+
+
 class DashboardStatsResponse(BaseModel):
     """Schema for dashboard statistics overview."""
 
     total_jobs_executed: int
     total_job_records: int
     total_job_sites: int
+    total_clients: int
     job_site_cards: list[JobSiteCardResponse]
