@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobSiteCardResponse(BaseModel):
@@ -26,7 +26,7 @@ class CareerJobResponse(BaseModel):
     job_site_id: int
     scrap_job_id: int
     meta_data: dict
-    contact_details: str | None
+    parsed_data: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     job_site_name: str | None = None

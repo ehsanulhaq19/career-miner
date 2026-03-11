@@ -1,5 +1,5 @@
 from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,14 +9,15 @@ from app.database import get_db
 from app.modules.auth.crud import get_user_by_id
 from app.modules.auth.models import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+http_bearer = HTTPBearer()
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Extract and validate the Bearer token, then return the authenticated user."""
+    token = credentials.credentials
     try:
         payload = verify_token(token)
         user_id: int | None = payload.get("sub")

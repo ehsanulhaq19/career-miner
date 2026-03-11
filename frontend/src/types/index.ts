@@ -19,6 +19,22 @@ export interface JobSite {
   updated_at: string;
 }
 
+export interface ParsedData {
+  job_title?: string;
+  job_type?: string;
+  location?: string;
+  skills?: string[];
+  experience?: string;
+  salary?: string;
+  company_name?: string;
+  company_emails?: string[];
+  company_numbers?: string[];
+  company_link?: string;
+  company_size?: string;
+  job_link?: string;
+  job_posted_datetime?: string;
+}
+
 export interface CareerJob {
   id: number;
   title: string;
@@ -27,7 +43,7 @@ export interface CareerJob {
   job_site_id: number;
   scrap_job_id: number;
   meta_data: Record<string, any>;
-  contact_details: string | null;
+  parsed_data?: ParsedData;
   created_at: string;
   updated_at: string;
   job_site_name?: string;

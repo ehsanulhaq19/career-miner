@@ -1,6 +1,8 @@
 import asyncio
+import json
 import logging
 import random
+import re
 from collections import deque
 from urllib.parse import urljoin, urlparse
 
@@ -9,14 +11,44 @@ from bs4 import BeautifulSoup, Tag
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
-from app.modules.career_job.crud import check_duplicate_job, create_career_job
+from app.modules.career_job.crud import (
+    check_job_exists_by_title_and_links,
+    create_career_job,
+)
+from app.modules.llm.service import LLMFactory
 from app.modules.job_site.models import JobSite
 from app.modules.scrap_job.crud import get_scrap_job_by_id, update_scrap_job_status
 from app.modules.scrap_job.models import ScrapJob, ScrapJobStatus
 from app.modules.scrap_job.schemas import ScrapJobResponse
+from app.modules.scraper.prompts import (
+    JOB_PARSER_SYSTEM_PROMPT,
+    JOB_PARSER_USER_PROMPT_TEMPLATE,
+)
 from app.modules.websocket.service import broadcast_scrap_job_status
 
 logger = logging.getLogger(__name__)
+
+def _extract_json_array(text: str) -> str | None:
+    """Extract JSON array from LLM response, handling markdown code blocks."""
+    text = text.strip()
+    if not text:
+        return None
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        return match.group(1).strip()
+    depth = 0
+    start = text.find("[")
+    if start < 0:
+        return None
+    for i, c in enumerate(text[start:], start):
+        if c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
 
 JOB_LISTING_KEYWORDS = [
     "job",
@@ -41,6 +73,9 @@ class ScraperService:
         scrap_job: ScrapJob,
     ) -> None:
         """Execute scraping for a single job site and save found jobs."""
+        refreshed = await get_scrap_job_by_id(db, scrap_job.id)
+        if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
+            return
         updated = await update_scrap_job_status(
             db, scrap_job.id, ScrapJobStatus.IN_PROGRESS
         )
@@ -53,6 +88,7 @@ class ScraperService:
             settings = get_settings()
             visited: set[str] = set()
             queued: set[str] = set()
+            all_jobs: list[dict] = []
             base_domain = urlparse(job_site.url).netloc
             to_visit: deque[str] = deque([job_site.url])
             queued.add(self._normalize_url(job_site.url))
@@ -98,28 +134,15 @@ class ScraperService:
                             job_data, job_site.categories
                         ):
                             continue
-                        existing = await check_duplicate_job(
+                        exists = await check_job_exists_by_title_and_links(
                             db,
                             title=job_data["title"],
                             job_site_id=job_site.id,
-                            url=job_data.get("url"),
-                            description=job_data.get("description"),
+                            links=job_data.get("links", []),
                         )
-                        if existing:
+                        if exists:
                             continue
-                        await create_career_job(
-                            db,
-                            {
-                                "title": job_data["title"],
-                                "description": job_data.get("description"),
-                                "url": job_data.get("url"),
-                                "job_site_id": job_site.id,
-                                "scrap_job_id": scrap_job.id,
-                                "contact_details": job_data.get("contact_details"),
-                                "meta_data": job_data.get("meta_data", {}),
-                            },
-                        )
-                        saved_count += 1
+                        all_jobs.append(job_data)
 
                     for link in self._extract_crawlable_links(html, final_url, base_domain):
                         normalized = self._normalize_url(link)
@@ -131,6 +154,24 @@ class ScraperService:
                     delay = self._random_delay(settings)
                     if delay > 0:
                         await asyncio.sleep(delay)
+
+                parsed_jobs_array = await self._fetch_job_details_via_llm(all_jobs)
+                for job_data, parsed_data in zip(all_jobs, parsed_jobs_array):
+                    links = job_data.get("links") or []
+                    primary_url = parsed_data.get("job_link") or (links[0] if links else None)
+                    await create_career_job(
+                        db,
+                        {
+                            "title": job_data["title"],
+                            "description": job_data.get("description"),
+                            "url": primary_url,
+                            "job_site_id": job_site.id,
+                            "scrap_job_id": scrap_job.id,
+                            "parsed_data": parsed_data,
+                            "meta_data": {},
+                        },
+                    )
+                    saved_count += 1
 
             logger.info(
                 "Scraping completed for site %s — %d pages crawled, %d jobs saved",
@@ -179,6 +220,54 @@ class ScraperService:
 
         return jobs
 
+    async def _fetch_job_details_via_llm(
+        self, jobs: list[dict]
+    ) -> list[dict]:
+        """
+        Fetch key details for jobs via LLM in chunks of 10.
+
+        Returns a list of parsed_data dicts in the same order as input jobs.
+        """
+        if not jobs:
+            return []
+        parsed_jobs_array: list[dict] = []
+        chunk_size = 5
+        llm_client = LLMFactory.get_client(
+            provider_name="grok",
+            model_name="grok-4-1-fast-reasoning",
+        )
+        for i in range(0, len(jobs), chunk_size):
+            chunk = jobs[i : i + chunk_size]
+            jobs_json = json.dumps(
+                [{"title": j["title"], "links": j.get("links", []), "description": j.get("description", "")} for j in chunk],
+                indent=2,
+            )
+            prompt = JOB_PARSER_USER_PROMPT_TEMPLATE.format(jobs_json=jobs_json)
+            try:
+                response = await llm_client.generate_content(
+                    system_prompt=JOB_PARSER_SYSTEM_PROMPT,
+                    prompt=prompt,
+                )
+                response_text = (response or "").strip()
+                json_str = _extract_json_array(response_text) or response_text
+                json_str = re.sub(r",\s*}", "}", json_str)
+                json_str = re.sub(r",\s*]", "]", json_str)
+                parsed = json.loads(json_str)
+                if isinstance(parsed, list):
+                    items = parsed[: len(chunk)]
+                    parsed_jobs_array.extend(items)
+                    if len(items) < len(chunk):
+                        parsed_jobs_array.extend([{}] * (len(chunk) - len(items)))
+                elif isinstance(parsed, dict):
+                    parsed_jobs_array.append(parsed)
+                    parsed_jobs_array.extend([{}] * (len(chunk) - 1))
+                else:
+                    parsed_jobs_array.extend([{}] * len(chunk))
+            except (json.JSONDecodeError, ValueError):
+                logger.warning("LLM returned invalid JSON for chunk %d", i // chunk_size)
+                parsed_jobs_array.extend([{}] * len(chunk))
+        return parsed_jobs_array[: len(jobs)]
+
     def _job_matches_categories(
         self, job_data: dict, categories: list | None
     ) -> bool:
@@ -225,21 +314,43 @@ class ScraperService:
         return unique
 
     def _parse_job_element(self, element: Tag, base_url: str) -> dict | None:
-        """Extract structured job data from a single HTML element."""
+        """
+        Extract structured job data from a single HTML element.
+
+        Filters out jobs that lack both url and email, or have no description or
+        description shorter than 100 characters. Returns data in format
+        {title, links, description}.
+        """
         title = None
-        url = None
+        links: list[str] = []
         description = None
-        contact_details = None
+        company_emails: list[str] = []
 
         heading = element.find(["h1", "h2", "h3", "h4", "a"])
         if heading:
             title = heading.get_text(strip=True)
             if heading.name == "a" and heading.get("href"):
-                url = urljoin(base_url, heading["href"])
+                href = heading["href"]
+                full_url = urljoin(base_url, href)
+                if full_url.startswith(("http://", "https://")):
+                    links.append(full_url)
             else:
                 link = heading.find("a")
                 if link and link.get("href"):
-                    url = urljoin(base_url, link["href"])
+                    full_url = urljoin(base_url, link["href"])
+                    if full_url.startswith(("http://", "https://")):
+                        links.append(full_url)
+
+        for tag in element.find_all("a", href=True):
+            href = str(tag.get("href", "")).lower()
+            if href.startswith("mailto:"):
+                email = href.replace("mailto:", "").split("?")[0].strip()
+                if email and email not in company_emails:
+                    company_emails.append(email)
+            elif href.startswith(("http://", "https://")):
+                full_url = urljoin(base_url, tag["href"])
+                if full_url not in links:
+                    links.append(full_url)
 
         if not title:
             return None
@@ -253,32 +364,37 @@ class ScraperService:
             if raw_text and raw_text != title:
                 description = raw_text
 
-        contact_keywords = ["email", "phone", "contact", "apply", "mailto:"]
-        for tag in element.find_all(["a", "span", "p", "div"]):
-            tag_text = tag.get_text(strip=True).lower()
-            tag_href = str(tag.get("href", "")).lower()
-            if any(kw in tag_text or kw in tag_href for kw in contact_keywords):
-                contact_details = tag.get_text(strip=True)
-                break
+        email_pattern = re.compile(
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+        )
+        if description and email_pattern.search(description):
+            for m in email_pattern.finditer(description):
+                e = m.group(0)
+                if e not in company_emails:
+                    company_emails.append(e)
 
-        meta_data: dict = {}
-        for attr_name in ["data-company", "data-location", "data-salary", "data-date"]:
-            value = element.get(attr_name)
-            if value:
-                meta_data[attr_name.replace("data-", "")] = value
+        has_url_or_email = len(links) > 0 or len(company_emails) > 0
+        if not has_url_or_email:
+            return None
+
+        if not description or len(description.strip()) < 100:
+            return None
 
         return {
             "title": title[:500],
+            "links": links,
             "description": description,
-            "url": url,
-            "contact_details": contact_details,
-            "meta_data": meta_data,
         }
 
     def _fallback_extraction(
         self, soup: BeautifulSoup, base_url: str
     ) -> list[dict]:
-        """Attempt a broad extraction when no structured job elements are found."""
+        """
+        Attempt a broad extraction when no structured job elements are found.
+
+        Returns jobs in format {title, links, description}. Only includes jobs
+        that have url and description with at least 100 characters.
+        """
         jobs: list[dict] = []
         for link in soup.find_all("a", href=True):
             text = link.get_text(strip=True)
@@ -286,13 +402,17 @@ class ScraperService:
             if not text or len(text) < 5:
                 continue
             if any(kw in href for kw in JOB_LISTING_KEYWORDS):
+                job_url = urljoin(base_url, link["href"])
+                if not job_url.startswith(("http://", "https://")):
+                    continue
+                description = text if len(text) >= 100 else None
+                if not description:
+                    continue
                 jobs.append(
                     {
                         "title": text[:500],
-                        "description": None,
-                        "url": urljoin(base_url, link["href"]),
-                        "contact_details": None,
-                        "meta_data": {},
+                        "links": [job_url],
+                        "description": description,
                     }
                 )
         return jobs
@@ -399,7 +519,6 @@ class ScraperService:
         referer = f"{parsed.scheme}://{parsed.netloc}/"
         headers = self._browser_headers(referer)
         response = await client.get(url, headers=headers)
-        print("--------url--------", url)
         response.raise_for_status()
         final_url = str(response.url)
         return response.text, final_url

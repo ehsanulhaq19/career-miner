@@ -15,6 +15,6 @@ class CareerJob(Base):
     job_site_id = Column(Integer, ForeignKey("job_sites.id"), nullable=False)
     scrap_job_id = Column(Integer, ForeignKey("scrap_jobs.id"), nullable=False)
     meta_data = Column(JSON, default=dict)
-    contact_details = Column(Text, nullable=True)
+    parsed_data = Column(JSON, default=dict)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -90,14 +90,101 @@ export default function JobDetailModal({ job, isOpen, onClose }: JobDetailModalP
             </div>
           )}
 
-          {job.contact_details && (
-            <div>
-              <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                Contact Details
-              </span>
-              <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                {job.contact_details}
-              </p>
+          {job.parsed_data &&
+            (job.parsed_data.location ||
+              job.parsed_data.salary ||
+              job.parsed_data.company_name ||
+              job.parsed_data.job_posted_datetime ||
+              (job.parsed_data.company_emails?.length ?? 0) > 0 ||
+              (job.parsed_data.company_numbers?.length ?? 0) > 0 ||
+              (job.parsed_data.skills?.length ?? 0) > 0) && (
+            <div className="space-y-4">
+              {job.parsed_data.location && (
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Location
+                  </span>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                    {job.parsed_data.location}
+                  </p>
+                </div>
+              )}
+              {job.parsed_data.salary && (
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Salary
+                  </span>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                    {job.parsed_data.salary}
+                  </p>
+                </div>
+              )}
+              {job.parsed_data.company_name && (
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Company
+                  </span>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                    {job.parsed_data.company_name}
+                  </p>
+                </div>
+              )}
+              {job.parsed_data.job_posted_datetime && (
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Posted
+                  </span>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                    {job.parsed_data.job_posted_datetime}
+                  </p>
+                </div>
+              )}
+              {(job.parsed_data.company_emails?.length ?? 0) > 0 && (
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Company Emails
+                  </span>
+                  <div className="mt-1 space-y-1">
+                    {(job.parsed_data.company_emails ?? []).map((email) => (
+                      <a
+                        key={email}
+                        href={`mailto:${email}`}
+                        className="block text-sm text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                        {email}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(job.parsed_data.company_numbers?.length ?? 0) > 0 && (
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Company Numbers
+                  </span>
+                  <div className="mt-1 space-y-1">
+                    {(job.parsed_data.company_numbers ?? []).map((num) => (
+                      <a
+                        key={num}
+                        href={`tel:${num}`}
+                        className="block text-sm text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                        {num}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(job.parsed_data.skills?.length ?? 0) > 0 && (
+                <div>
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Skills
+                  </span>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                    {(job.parsed_data.skills ?? []).join(", ")}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

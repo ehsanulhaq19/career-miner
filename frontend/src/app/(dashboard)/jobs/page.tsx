@@ -174,9 +174,9 @@ export default function JobsPage() {
                   <span>{job.job_site_name ?? `Site #${job.job_site_id}`}</span>
                   <span>{new Date(job.created_at).toLocaleDateString()}</span>
                 </div>
-                {job.contact_details && (
+                {job.parsed_data?.location && (
                   <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
-                    {job.contact_details}
+                    {job.parsed_data.location}
                   </p>
                 )}
               </button>

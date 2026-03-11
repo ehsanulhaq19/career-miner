@@ -14,6 +14,8 @@ import { ScrapJob } from "@/types";
 
 function getStatusBadgeClass(status: string): string {
   switch (status) {
+    case "pending":
+      return "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400";
     case "in_progress":
       return "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400";
     case "completed":
@@ -222,7 +224,7 @@ export default function ScrapJobsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
-                        {job.status === "in_progress" && (
+                        {(job.status === "pending" || job.status === "in_progress") && (
                           <button
                             onClick={() => handleStop(job)}
                             disabled={actioningId === job.id}

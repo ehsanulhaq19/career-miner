@@ -75,6 +75,28 @@ async def check_duplicate_job(
     return result.scalars().first()
 
 
+async def check_job_exists_by_title_and_links(
+    db: AsyncSession,
+    title: str,
+    job_site_id: int,
+    links: list[str],
+) -> bool:
+    """
+    Check if a CareerJob exists with same title and one of the links as url.
+
+    Returns True if a matching job exists, False otherwise.
+    """
+    if not links:
+        return False
+    query = select(CareerJob).where(
+        CareerJob.title == title,
+        CareerJob.job_site_id == job_site_id,
+        CareerJob.url.in_(links),
+    )
+    result = await db.execute(query)
+    return result.scalars().first() is not None
+
+
 async def get_total_career_jobs_count(db: AsyncSession) -> int:
     """Return the total count of all career jobs."""
     result = await db.execute(select(func.count(CareerJob.id)))

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     CRAWL_DELAY_MAX_SECONDS: float = 2.0
     SCRAP_HTTP_PROXY: str | None = None
     APP_NAME: str = "CareerMiner"
+    XAI_API_KEY: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

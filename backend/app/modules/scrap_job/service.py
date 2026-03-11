@@ -50,15 +50,17 @@ async def start_scrap_job(
 
 async def stop_scrap_job(db: AsyncSession, scrap_job_id: int) -> ScrapJobResponse:
     """
-    Stop a scrap job that is currently in progress.
-    Only jobs with status in_progress can be stopped.
+    Stop a scrap job that is pending or in progress.
     """
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job is None:
         raise NotFoundException(detail="Scrap job not found")
-    if scrap_job.status != ScrapJobStatus.IN_PROGRESS.value:
+    if scrap_job.status not in (
+        ScrapJobStatus.PENDING.value,
+        ScrapJobStatus.IN_PROGRESS.value,
+    ):
         raise BadRequestException(
-            detail="Only jobs with status 'in_progress' can be stopped"
+            detail="Only jobs with status 'pending' or 'in_progress' can be stopped"
         )
 
     updated = await update_scrap_job_status(db, scrap_job_id, ScrapJobStatus.STOPPED)
