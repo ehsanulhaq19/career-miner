@@ -10,7 +10,9 @@ import {
   SCRAP_JOB_ERROR,
   SCRAP_JOB_TERMINATED,
   SCRAP_JOB_STOPPED,
+  SCRAP_JOB_LOG,
 } from "@/constants/socketMessageTypes";
+import { addScrapJobLogFromSocket } from "@/store/slices/scrapJobSlice";
 import Cookies from "js-cookie";
 
 const SCRAP_JOB_TYPES = [
@@ -20,6 +22,7 @@ const SCRAP_JOB_TYPES = [
   SCRAP_JOB_ERROR,
   SCRAP_JOB_TERMINATED,
   SCRAP_JOB_STOPPED,
+  SCRAP_JOB_LOG,
 ];
 
 function getWebSocketUrl(userId: number): string {
@@ -54,6 +57,21 @@ export default function WebSocketProvider({
           const { type, data } = message;
           if (!type || !data) return;
           if (!SCRAP_JOB_TYPES.includes(type)) return;
+
+          if (type === SCRAP_JOB_LOG) {
+            const log = {
+              id: data.id,
+              scrap_job_id: data.scrap_job_id,
+              action: data.action,
+              progress: data.progress,
+              status: data.status,
+              details: data.details,
+              meta_data: data.meta_data || {},
+              created_at: data.created_at,
+            };
+            dispatch(addScrapJobLogFromSocket(log));
+            return;
+          }
 
           const scrapJob = {
             id: data.id,

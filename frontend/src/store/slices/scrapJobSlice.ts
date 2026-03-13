@@ -1,12 +1,14 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { scrapJobService } from "@/services/scrapJobService";
-import { ScrapJob } from "@/types";
+import { ScrapJob, ScrapJobLog } from "@/types";
 
 interface ScrapJobState {
   items: ScrapJob[];
   total: number;
   loading: boolean;
   error: string | null;
+  logsByJobId: Record<number, ScrapJobLog[]>;
+  logsLoading: boolean;
 }
 
 const initialState: ScrapJobState = {
@@ -14,6 +16,8 @@ const initialState: ScrapJobState = {
   total: 0,
   loading: false,
   error: null,
+  logsByJobId: {},
+  logsLoading: false,
 };
 
 export const fetchScrapJobs = createAsyncThunk(
@@ -76,6 +80,20 @@ export const resumeScrapJob = createAsyncThunk(
   }
 );
 
+export const fetchScrapJobLogs = createAsyncThunk(
+  "scrapJob/fetchLogs",
+  async (scrapJobId: number, { rejectWithValue }) => {
+    try {
+      const data = await scrapJobService.getScrapJobLogs(scrapJobId);
+      return { scrapJobId, logs: data.items };
+    } catch (error: any) {
+      return rejectWithValue(
+        error.response?.data?.detail || "Failed to fetch scrap job logs"
+      );
+    }
+  }
+);
+
 const scrapJobSlice = createSlice({
   name: "scrapJob",
   initialState,
@@ -86,6 +104,22 @@ const scrapJobSlice = createSlice({
       );
       if (index !== -1) {
         state.items[index] = action.payload;
+      }
+    },
+    addScrapJobLogFromSocket(state, action: { payload: ScrapJobLog }) {
+      const log = action.payload;
+      const jobId = log.scrap_job_id;
+      if (!state.logsByJobId[jobId]) {
+        state.logsByJobId[jobId] = [];
+      }
+      const existing = state.logsByJobId[jobId].find((l) => l.id === log.id);
+      if (!existing) {
+        const merged = [...state.logsByJobId[jobId], log];
+        merged.sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+        state.logsByJobId[jobId] = merged;
       }
     },
   },
@@ -128,9 +162,36 @@ const scrapJobSlice = createSlice({
         if (index !== -1) {
           state.items[index] = action.payload;
         }
+      })
+      .addCase(fetchScrapJobLogs.pending, (state) => {
+        state.logsLoading = true;
+      })
+      .addCase(fetchScrapJobLogs.fulfilled, (state, action) => {
+        state.logsLoading = false;
+        const existing = state.logsByJobId[action.payload.scrapJobId] || [];
+        const fromApi = action.payload.logs;
+        const seen = new Set(fromApi.map((l) => l.id));
+        const merged = [...fromApi];
+        for (const log of existing) {
+          if (!seen.has(log.id)) {
+            merged.push(log);
+            seen.add(log.id);
+          }
+        }
+        merged.sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+        state.logsByJobId[action.payload.scrapJobId] = merged;
+      })
+      .addCase(fetchScrapJobLogs.rejected, (state) => {
+        state.logsLoading = false;
       });
   },
 });
 
-export const { updateScrapJobFromSocket } = scrapJobSlice.actions;
+export const {
+  updateScrapJobFromSocket,
+  addScrapJobLogFromSocket,
+} = scrapJobSlice.actions;
 export default scrapJobSlice.reducer;

@@ -5,13 +5,16 @@ from app.database import async_session, get_db
 from app.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.job_site.crud import get_job_site_by_id
+from app.modules.scrap_job.crud import get_scrap_job_by_id
 from app.modules.scrap_job.schemas import (
     ScrapJobListResponse,
+    ScrapJobLogListResponse,
     ScrapJobResponse,
     ScrapJobStartRequest,
 )
 from app.modules.scrap_job.service import (
     get_scrap_job,
+    get_scrap_job_logs,
     list_scrap_jobs,
     start_scrap_job,
     stop_scrap_job,
@@ -29,8 +32,6 @@ async def _run_scraper_background(job_site_id: int, scrap_job_id: int) -> None:
             job_site = await get_job_site_by_id(db, job_site_id)
             if job_site is None:
                 return
-            from app.modules.scrap_job.crud import get_scrap_job_by_id
-
             scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
             if scrap_job is None:
                 return
@@ -77,8 +78,6 @@ async def resume_scrap_job_endpoint(
 ) -> ScrapJobResponse:
     """Resume a stopped scrap job."""
     result = await resume_scrap_job(db, scrap_job_id)
-    from app.modules.scrap_job.crud import get_scrap_job_by_id
-
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job:
         job_site = await get_job_site_by_id(db, scrap_job.job_site_id)
@@ -114,3 +113,13 @@ async def get_scrap_job_endpoint(
 ) -> ScrapJobResponse:
     """Retrieve a single scrap job by ID."""
     return await get_scrap_job(db, scrap_job_id)
+
+
+@router.get("/{scrap_job_id}/logs", response_model=ScrapJobLogListResponse)
+async def get_scrap_job_logs_endpoint(
+    scrap_job_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ScrapJobLogListResponse:
+    """Retrieve scrap job logs for a given scrap job."""
+    return await get_scrap_job_logs(db, scrap_job_id)

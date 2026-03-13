@@ -6,13 +6,20 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.scrap_job.crud import (
     create_scrap_job,
+    create_scrap_job_log,
     get_active_scrap_jobs_for_site,
     get_scrap_job_by_id,
+    get_scrap_job_logs_by_scrap_job_id,
     get_scrap_jobs,
     update_scrap_job_status,
 )
 from app.modules.scrap_job.models import ScrapJobStatus
-from app.modules.scrap_job.schemas import ScrapJobListResponse, ScrapJobResponse
+from app.modules.scrap_job.schemas import (
+    ScrapJobListResponse,
+    ScrapJobLogListResponse,
+    ScrapJobLogResponse,
+    ScrapJobResponse,
+)
 from app.modules.websocket.service import broadcast_scrap_job_status
 
 
@@ -115,3 +122,53 @@ async def get_scrap_job(db: AsyncSession, scrap_job_id: int) -> ScrapJobResponse
     if scrap_job is None:
         raise NotFoundException(detail="Scrap job not found")
     return ScrapJobResponse.model_validate(scrap_job)
+
+
+async def create_log_and_broadcast(
+    db: AsyncSession,
+    scrap_job_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "in_progress",
+    details: str | None = None,
+    meta_data: dict | None = None,
+):
+    """
+    Create a scrap job log entry and broadcast it via WebSocket.
+    Uses a separate session to commit immediately so logs are visible at runtime.
+    """
+    print("---------create_log_and_broadcast------------", action, progress, status, details, meta_data)
+    from app.database import async_session
+    from app.modules.websocket.service import broadcast_scrap_job_log
+
+    async with async_session() as log_db:
+        try:
+            log = await create_scrap_job_log(
+                log_db,
+                scrap_job_id=scrap_job_id,
+                action=action,
+                progress=progress,
+                status=status,
+                details=details,
+                meta_data=meta_data,
+            )
+            await log_db.commit()
+            await broadcast_scrap_job_log(ScrapJobLogResponse.model_validate(log).model_dump())
+            return log
+        except Exception:
+            await log_db.rollback()
+            raise
+
+
+async def get_scrap_job_logs(
+    db: AsyncSession,
+    scrap_job_id: int,
+) -> ScrapJobLogListResponse:
+    """Return all logs for a scrap job."""
+    scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
+    if scrap_job is None:
+        raise NotFoundException(detail="Scrap job not found")
+    logs = await get_scrap_job_logs_by_scrap_job_id(db, scrap_job_id)
+    return ScrapJobLogListResponse(
+        items=[ScrapJobLogResponse.model_validate(log) for log in logs]
+    )

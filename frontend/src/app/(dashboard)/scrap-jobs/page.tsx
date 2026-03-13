@@ -1,16 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { HiOutlinePlay, HiOutlineStop, HiOutlineArrowPath } from "react-icons/hi2";
+import {
+  HiOutlinePlay,
+  HiOutlineStop,
+  HiOutlineArrowPath,
+  HiOutlineDocumentText,
+} from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchScrapJobs,
   startScrapJob,
   stopScrapJob,
   resumeScrapJob,
+  fetchScrapJobLogs,
 } from "@/store/slices/scrapJobSlice";
 import { fetchJobSites } from "@/store/slices/jobSiteSlice";
-import { ScrapJob } from "@/types";
+import { ScrapJob, ScrapJobLog } from "@/types";
 
 function getStatusBadgeClass(status: string): string {
   switch (status) {
@@ -37,12 +43,15 @@ function formatStatus(status: string): string {
 
 export default function ScrapJobsPage() {
   const dispatch = useAppDispatch();
-  const { items, loading, error } = useAppSelector((state) => state.scrapJob);
+  const { items, loading, error, logsByJobId, logsLoading } = useAppSelector(
+    (state) => state.scrapJob
+  );
   const { items: jobSites } = useAppSelector((state) => state.jobSite);
   const [selectedSiteId, setSelectedSiteId] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [actioningId, setActioningId] = useState<number | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [logsModalJobId, setLogsModalJobId] = useState<number | null>(null);
 
   useEffect(() => {
     dispatch(fetchJobSites());
@@ -104,6 +113,15 @@ export default function ScrapJobsPage() {
       setActioningId(null);
     }
   };
+
+  const handleOpenLogs = (job: ScrapJob) => {
+    setLogsModalJobId(job.id);
+    dispatch(fetchScrapJobLogs(job.id));
+  };
+
+  const logsForModal: ScrapJobLog[] = logsModalJobId
+    ? logsByJobId[logsModalJobId] || []
+    : [];
 
   const activeSites = jobSites.filter((s) => s.is_active);
   const canStart = selectedSiteId && !starting;
@@ -224,6 +242,13 @@ export default function ScrapJobsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleOpenLogs(job)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                        >
+                          <HiOutlineDocumentText className="w-4 h-4" />
+                          Logs
+                        </button>
                         {(job.status === "pending" || job.status === "in_progress") && (
                           <button
                             onClick={() => handleStop(job)}
@@ -253,6 +278,83 @@ export default function ScrapJobsPage() {
           </div>
         )}
       </div>
+
+      {logsModalJobId !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setLogsModalJobId(null)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Scrap Job Logs
+              </h3>
+              <button
+                onClick={() => setLogsModalJobId(null)}
+                className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-400"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {logsLoading ? (
+                <div className="space-y-3">
+                  {[...Array(5)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="animate-pulse h-12 bg-gray-200 dark:bg-gray-700 rounded"
+                    />
+                  ))}
+                </div>
+              ) : logsForModal.length === 0 ? (
+                <p className="text-gray-500 dark:text-gray-400 text-center py-8">
+                  No logs yet.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {logsForModal.map((log) => (
+                    <div
+                      key={log.id}
+                      className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700"
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="font-medium text-gray-900 dark:text-white">
+                          {log.action}
+                        </span>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded ${
+                            log.status === "completed"
+                              ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                              : log.status === "error"
+                                ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+                                : log.status === "in_progress"
+                                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400"
+                                  : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
+                          }`}
+                        >
+                          {log.status}
+                        </span>
+                      </div>
+                      {log.details && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+                          {log.details}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
+                        {new Date(log.created_at).toLocaleString()}
+                        {log.progress > 0 && ` · Progress: ${log.progress}%`}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

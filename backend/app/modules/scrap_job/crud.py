@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.scrap_job.models import ScrapJob, ScrapJobStatus
+from app.modules.scrap_job.models import ScrapJob, ScrapJobLog, ScrapJobStatus
 
 
 async def get_scrap_jobs(
@@ -80,6 +80,43 @@ async def get_active_scrap_jobs_for_site(
                 [ScrapJobStatus.PENDING.value, ScrapJobStatus.IN_PROGRESS.value]
             ),
         )
+    )
+    return list(result.scalars().all())
+
+
+async def create_scrap_job_log(
+    db: AsyncSession,
+    scrap_job_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "pending",
+    details: str | None = None,
+    meta_data: dict | None = None,
+) -> ScrapJobLog:
+    """Create a new scrap job log entry."""
+    log = ScrapJobLog(
+        scrap_job_id=scrap_job_id,
+        action=action,
+        progress=progress,
+        status=status,
+        details=details,
+        meta_data=meta_data or {},
+    )
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+    return log
+
+
+async def get_scrap_job_logs_by_scrap_job_id(
+    db: AsyncSession,
+    scrap_job_id: int,
+) -> list[ScrapJobLog]:
+    """Retrieve all log entries for a scrap job ordered by creation time."""
+    result = await db.execute(
+        select(ScrapJobLog)
+        .where(ScrapJobLog.scrap_job_id == scrap_job_id)
+        .order_by(ScrapJobLog.created_at.asc())
     )
     return list(result.scalars().all())
 

@@ -65,6 +65,17 @@ export interface ScrapJob {
   updated_at: string;
 }
 
+export interface ScrapJobLog {
+  id: number;
+  scrap_job_id: number;
+  action: string;
+  progress: number;
+  status: string;
+  details: string | null;
+  meta_data: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface CareerClient {
   id: number;
   emails: string[];

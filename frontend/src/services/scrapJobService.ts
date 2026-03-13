@@ -1,5 +1,5 @@
 import api from "./api";
-import { PaginatedResponse, ScrapJob } from "@/types";
+import { PaginatedResponse, ScrapJob, ScrapJobLog } from "@/types";
 
 export const scrapJobService = {
   async getScrapJobs(params?: {
@@ -33,6 +33,13 @@ export const scrapJobService = {
 
   async resumeScrapJob(id: number) {
     const { data } = await api.post<ScrapJob>(`/scrap-jobs/${id}/resume`);
+    return data;
+  },
+
+  async getScrapJobLogs(scrapJobId: number) {
+    const { data } = await api.get<{ items: ScrapJobLog[] }>(
+      `/scrap-jobs/${scrapJobId}/logs`
+    );
     return data;
   },
 };

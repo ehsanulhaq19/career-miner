@@ -27,3 +27,24 @@ class ScrapJobListResponse(BaseModel):
 
     items: list[ScrapJobResponse]
     total: int
+
+
+class ScrapJobLogResponse(BaseModel):
+    """Schema for scrap job log response data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    scrap_job_id: int
+    action: str
+    progress: int
+    status: str
+    details: str | None
+    meta_data: dict
+    created_at: datetime
+
+
+class ScrapJobLogListResponse(BaseModel):
+    """Schema for list of scrap job logs."""
+
+    items: list[ScrapJobLogResponse]

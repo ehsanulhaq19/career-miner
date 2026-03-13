@@ -25,6 +25,7 @@ from app.modules.scraper.prompts import (
     JOB_PARSER_SYSTEM_PROMPT,
     JOB_PARSER_USER_PROMPT_TEMPLATE,
 )
+from app.modules.scrap_job.service import create_log_and_broadcast
 from app.modules.websocket.service import broadcast_scrap_job_status
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class ScraperService:
             db, scrap_job.id, ScrapJobStatus.IN_PROGRESS
         )
         if updated:
+            await db.commit()
             await broadcast_scrap_job_status(
                 ScrapJobResponse.model_validate(updated).model_dump(),
                 ScrapJobStatus.IN_PROGRESS.value,
@@ -96,6 +98,16 @@ class ScraperService:
             saved_count = 0
             pages_scraped = 0
 
+            await create_log_and_broadcast(
+                db,
+                scrap_job.id,
+                "scrap_started",
+                progress=0,
+                status="in_progress",
+                details=f"Starting scrape for {job_site.name}",
+                meta_data={"job_site_id": job_site.id, "job_site_name": job_site.name},
+            )
+
             client_kwargs: dict = {
                 "timeout": 30,
                 "follow_redirects": True,
@@ -105,7 +117,6 @@ class ScraperService:
                 client_kwargs["proxy"] = settings.SCRAP_HTTP_PROXY
             async with httpx.AsyncClient(**client_kwargs) as client:
                 await self._warm_up_session(client, job_site.url)
-
                 while to_visit and pages_scraped < settings.MAX_PAGES_PER_SCRAP:
                     refreshed = await get_scrap_job_by_id(db, scrap_job.id)
                     if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
@@ -118,16 +129,63 @@ class ScraperService:
                         continue
                     visited.add(url_normalized)
 
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "fetch_page",
+                        progress=pages_scraped,
+                        status="in_progress",
+                        details=f"Fetching page {pages_scraped + 1}",
+                        meta_data={"url": url, "page_index": pages_scraped},
+                    )
                     try:
                         html, final_url = await self._fetch_page(client, url)
                     except Exception as e:
                         logger.warning("Failed to fetch %s: %s", url, e)
+                        await create_log_and_broadcast(
+                            db,
+                            scrap_job.id,
+                            "fetch_page",
+                            progress=pages_scraped,
+                            status="error",
+                            details=str(e),
+                            meta_data={"url": url, "page_index": pages_scraped},
+                        )
                         continue
+
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "fetch_page",
+                        progress=pages_scraped + 1,
+                        status="completed",
+                        details=f"Fetched page {url}",
+                        meta_data={"url": final_url, "page_index": pages_scraped},
+                    )
 
                     if pages_scraped == 0:
                         base_domain = urlparse(final_url).netloc
 
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "extract_jobs_from_html",
+                        progress=pages_scraped,
+                        status="in_progress",
+                        details=f"Extracting jobs from page {pages_scraped + 1}",
+                        meta_data={"url": final_url},
+                    )
                     jobs = await self._extract_jobs_from_html(html, final_url)
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "extract_jobs_from_html",
+                        progress=pages_scraped,
+                        status="completed",
+                        details=f"Extracted {len(jobs)} jobs from page",
+                        meta_data={"url": final_url, "jobs_count": len(jobs)},
+                    )
+                    jobs_validated = 0
                     for job_data in jobs:
                         if not job_data.get("title"):
                             continue
@@ -144,20 +202,81 @@ class ScraperService:
                         if exists:
                             continue
                         all_jobs.append(job_data)
+                        jobs_validated += 1
 
-                    for link in self._extract_crawlable_links(html, final_url, base_domain):
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "jobs_validation",
+                        progress=pages_scraped,
+                        status="completed",
+                        details=f"Validated {len(jobs)} jobs, {jobs_validated} new",
+                        meta_data={
+                            "total_on_page": len(jobs),
+                            "new_jobs": jobs_validated,
+                            "total_collected": len(all_jobs),
+                        },
+                    )
+
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "extract_crawlable_links",
+                        progress=pages_scraped,
+                        status="in_progress",
+                        details=f"Extracting links from page {pages_scraped + 1}",
+                        meta_data={"url": final_url},
+                    )
+                    crawlable_links = self._extract_crawlable_links(html, final_url, base_domain)
+                    for link in crawlable_links:
                         normalized = self._normalize_url(link)
                         if normalized not in visited and normalized not in queued:
                             to_visit.append(link)
                             queued.add(normalized)
+
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "extract_crawlable_links",
+                        progress=pages_scraped,
+                        status="completed",
+                        details=f"Found {len(crawlable_links)} crawlable links",
+                        meta_data={"links_count": len(crawlable_links), "queue_size": len(to_visit)},
+                    )
 
                     pages_scraped += 1
                     delay = self._random_delay(settings)
                     if delay > 0:
                         await asyncio.sleep(delay)
 
-                parsed_jobs_array = await self._fetch_job_details_via_llm(all_jobs)
-                for job_data, parsed_data in zip(all_jobs, parsed_jobs_array):
+                refreshed = await get_scrap_job_by_id(db, scrap_job.id)
+                if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
+                    logger.info("Scrap job %d stopped by user", scrap_job.id)
+                    return
+
+                total_jobs = len(all_jobs)
+                await create_log_and_broadcast(
+                    db,
+                    scrap_job.id,
+                    "fetch_job_details_via_llm",
+                    progress=0,
+                    status="in_progress",
+                    details=f"Parsing {total_jobs} jobs via LLM",
+                    meta_data={"total_jobs": total_jobs},
+                )
+
+                chunk_size = 5
+                total_chunks = (total_jobs + chunk_size - 1) // chunk_size if total_jobs else 0
+                jobs_created_in_phase = 0
+
+                async for job_data, parsed_data in self._fetch_job_details_via_llm(
+                    all_jobs, db, scrap_job.id
+                ):
+                    refreshed = await get_scrap_job_by_id(db, scrap_job.id)
+                    if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
+                        logger.info("Scrap job %d stopped by user", scrap_job.id)
+                        return
+
                     links = job_data.get("links") or []
                     primary_url = parsed_data.get("job_link") or (links[0] if links else None)
                     career_client = await get_or_create_career_client(
@@ -181,7 +300,50 @@ class ScraperService:
                     if career_client:
                         career_job_data["career_client_id"] = career_client.id
                     await create_career_job(db, career_job_data)
+                    await db.commit()
                     saved_count += 1
+                    jobs_created_in_phase += 1
+
+                    await create_log_and_broadcast(
+                        db,
+                        scrap_job.id,
+                        "jobs_creation",
+                        progress=saved_count,
+                        status="completed",
+                        details=f"Created job: {job_data.get('title', '')[:50]}",
+                        meta_data={
+                            "job_title": job_data.get("title"),
+                            "total_created": saved_count,
+                        },
+                    )
+
+                    if jobs_created_in_phase % chunk_size == 0 or jobs_created_in_phase == total_jobs:
+                        await create_log_and_broadcast(
+                            db,
+                            scrap_job.id,
+                            "fetch_job_details_via_llm",
+                            progress=min(
+                                (jobs_created_in_phase // chunk_size + 1) * 100 // max(total_chunks, 1),
+                                100,
+                            ),
+                            status="in_progress",
+                            details=f"Processed {jobs_created_in_phase}/{total_jobs} jobs",
+                            meta_data={
+                                "processed": jobs_created_in_phase,
+                                "total_jobs": total_jobs,
+                                "chunk_size": chunk_size,
+                            },
+                        )
+
+            await create_log_and_broadcast(
+                db,
+                scrap_job.id,
+                "fetch_job_details_via_llm",
+                progress=100,
+                status="completed",
+                details=f"Parsed and processed {total_jobs} jobs",
+                meta_data={"total_jobs": total_jobs, "jobs_saved": saved_count},
+            )
 
             logger.info(
                 "Scraping completed for site %s — %d pages crawled, %d jobs saved",
@@ -195,18 +357,32 @@ class ScraperService:
                     db, scrap_job.id, ScrapJobStatus.COMPLETED
                 )
                 if updated:
+                    await db.commit()
                     await broadcast_scrap_job_status(
                         ScrapJobResponse.model_validate(updated).model_dump(),
                         ScrapJobStatus.COMPLETED.value,
                     )
-        except Exception:
+        except Exception as exc:
             logger.exception("Scraping failed for site %s", job_site.name)
+            try:
+                await create_log_and_broadcast(
+                    db,
+                    scrap_job.id,
+                    "scrap_failed",
+                    progress=0,
+                    status="error",
+                    details=str(exc),
+                    meta_data={"job_site_name": job_site.name},
+                )
+            except Exception:
+                pass
             refreshed = await get_scrap_job_by_id(db, scrap_job.id)
             if refreshed and refreshed.status != ScrapJobStatus.STOPPED.value:
                 updated = await update_scrap_job_status(
                     db, scrap_job.id, ScrapJobStatus.ERROR
                 )
                 if updated:
+                    await db.commit()
                     await broadcast_scrap_job_status(
                         ScrapJobResponse.model_validate(updated).model_dump(),
                         ScrapJobStatus.ERROR.value,
@@ -231,28 +407,31 @@ class ScraperService:
         return jobs
 
     async def _fetch_job_details_via_llm(
-        self, jobs: list[dict]
-    ) -> list[dict]:
+        self, jobs: list[dict], db: AsyncSession, scrap_job_id: int
+    ):
         """
-        Fetch key details for jobs via LLM in chunks of 10.
-
-        Returns a list of parsed_data dicts in the same order as input jobs.
+        Fetch key details for jobs via LLM in chunks.
+        Yields (job_data, parsed_data) for each job as chunks are parsed.
         """
         if not jobs:
-            return []
-        parsed_jobs_array: list[dict] = []
+            return
         chunk_size = 5
         llm_client = LLMFactory.get_client(
             provider_name="grok",
             model_name="grok-4-1-fast-reasoning",
         )
         for i in range(0, len(jobs), chunk_size):
+            refreshed = await get_scrap_job_by_id(db, scrap_job_id)
+            if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
+                return
+
             chunk = jobs[i : i + chunk_size]
             jobs_json = json.dumps(
                 [{"title": j["title"], "links": j.get("links", []), "description": j.get("description", "")} for j in chunk],
                 indent=2,
             )
             prompt = JOB_PARSER_USER_PROMPT_TEMPLATE.format(jobs_json=jobs_json)
+            parsed_items: list[dict] = []
             try:
                 response = await llm_client.generate_content(
                     system_prompt=JOB_PARSER_SYSTEM_PROMPT,
@@ -264,19 +443,18 @@ class ScraperService:
                 json_str = re.sub(r",\s*]", "]", json_str)
                 parsed = json.loads(json_str)
                 if isinstance(parsed, list):
-                    items = parsed[: len(chunk)]
-                    parsed_jobs_array.extend(items)
-                    if len(items) < len(chunk):
-                        parsed_jobs_array.extend([{}] * (len(chunk) - len(items)))
+                    parsed_items = parsed[: len(chunk)]
+                    if len(parsed_items) < len(chunk):
+                        parsed_items.extend([{}] * (len(chunk) - len(parsed_items)))
                 elif isinstance(parsed, dict):
-                    parsed_jobs_array.append(parsed)
-                    parsed_jobs_array.extend([{}] * (len(chunk) - 1))
+                    parsed_items = [parsed] + [{}] * (len(chunk) - 1)
                 else:
-                    parsed_jobs_array.extend([{}] * len(chunk))
+                    parsed_items = [{}] * len(chunk)
             except (json.JSONDecodeError, ValueError):
                 logger.warning("LLM returned invalid JSON for chunk %d", i // chunk_size)
-                parsed_jobs_array.extend([{}] * len(chunk))
-        return parsed_jobs_array[: len(jobs)]
+                parsed_items = [{}] * len(chunk)
+            for job_data, parsed_data in zip(chunk, parsed_items):
+                yield job_data, parsed_data
 
     def _parse_emails(self, value: str | list | None) -> list[str]:
         """Parse company_emails from LLM response into a list of strings."""
