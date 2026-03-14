@@ -58,5 +58,6 @@ class ScrapJob(Base):
         default=ScrapJobStatus.PENDING.value,
         nullable=False,
     )
+    meta_data = Column(JSON, default=dict, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

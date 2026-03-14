@@ -19,10 +19,24 @@ export const scrapJobService = {
     return data;
   },
 
-  async startScrapJob(job_site_id: number) {
-    const { data } = await api.post<ScrapJob>("/scrap-jobs/start", {
-      job_site_id,
-    });
+  async startScrapJob(params: {
+    job_site_id: number;
+    load_more_on_scroll?: boolean;
+    max_scroll?: number;
+  }) {
+    const { data } = await api.post<ScrapJob>("/scrap-jobs/start", params);
+    return data;
+  },
+
+  async testScrapJob(params: {
+    job_site_id: number;
+    categories: string[];
+    max_pages_per_scrap: number;
+    process_with_llm: boolean;
+    load_more_on_scroll?: boolean;
+    max_scroll?: number;
+  }) {
+    const { data } = await api.post<ScrapJob>("/scrap-jobs/test", params);
     return data;
   },
 

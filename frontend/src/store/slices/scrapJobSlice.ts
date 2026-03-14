@@ -43,12 +43,42 @@ export const fetchScrapJobs = createAsyncThunk(
 
 export const startScrapJob = createAsyncThunk(
   "scrapJob/start",
-  async (job_site_id: number, { rejectWithValue }) => {
+  async (
+    params: {
+      job_site_id: number;
+      load_more_on_scroll?: boolean;
+      max_scroll?: number;
+    },
+    { rejectWithValue }
+  ) => {
     try {
-      return await scrapJobService.startScrapJob(job_site_id);
+      return await scrapJobService.startScrapJob(params);
     } catch (error: any) {
       return rejectWithValue(
         error.response?.data?.detail || "Failed to start scrap job"
+      );
+    }
+  }
+);
+
+export const testScrapJob = createAsyncThunk(
+  "scrapJob/test",
+  async (
+    params: {
+      job_site_id: number;
+      categories: string[];
+      max_pages_per_scrap: number;
+      process_with_llm: boolean;
+      load_more_on_scroll?: boolean;
+      max_scroll?: number;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      return await scrapJobService.testScrapJob(params);
+    } catch (error: any) {
+      return rejectWithValue(
+        error.response?.data?.detail || "Failed to start test scrap job"
       );
     }
   }
@@ -139,6 +169,15 @@ const scrapJobSlice = createSlice({
         state.error = action.payload as string;
       })
       .addCase(startScrapJob.fulfilled, (state, action) => {
+        const exists = state.items.some(
+          (item) => item.id === action.payload.id
+        );
+        if (!exists) {
+          state.items.unshift(action.payload);
+          state.total += 1;
+        }
+      })
+      .addCase(testScrapJob.fulfilled, (state, action) => {
         const exists = state.items.some(
           (item) => item.id === action.payload.id
         );

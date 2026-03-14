@@ -11,6 +11,7 @@ from app.modules.scrap_job.crud import (
     get_scrap_job_by_id,
     get_scrap_job_logs_by_scrap_job_id,
     get_scrap_jobs,
+    update_scrap_job_meta_data,
     update_scrap_job_status,
 )
 from app.modules.scrap_job.models import ScrapJobStatus
@@ -19,6 +20,7 @@ from app.modules.scrap_job.schemas import (
     ScrapJobLogListResponse,
     ScrapJobLogResponse,
     ScrapJobResponse,
+    TestScrapRequest,
 )
 from app.modules.websocket.service import broadcast_scrap_job_status
 
@@ -26,6 +28,8 @@ from app.modules.websocket.service import broadcast_scrap_job_status
 async def start_scrap_job(
     db: AsyncSession,
     job_site_id: int,
+    load_more_on_scroll: bool = False,
+    max_scroll: int = 10,
 ) -> ScrapJobResponse:
     """
     Create and start a new scrap job for the given job site.
@@ -42,12 +46,17 @@ async def start_scrap_job(
             detail="An active scrap job already exists for this job site"
         )
 
+    meta_data = {
+        "load_more_on_scroll": load_more_on_scroll,
+        "max_scroll": max_scroll,
+    }
     scrap_job = await create_scrap_job(
         db,
         {
             "name": f"job_{int(datetime.now(timezone.utc).timestamp())}",
             "job_site_id": job_site_id,
             "status": ScrapJobStatus.PENDING.value,
+            "meta_data": meta_data,
         },
     )
     response = ScrapJobResponse.model_validate(scrap_job)
@@ -137,7 +146,6 @@ async def create_log_and_broadcast(
     Create a scrap job log entry and broadcast it via WebSocket.
     Uses a separate session to commit immediately so logs are visible at runtime.
     """
-    print("---------create_log_and_broadcast------------", action, progress, status, details, meta_data)
     from app.database import async_session
     from app.modules.websocket.service import broadcast_scrap_job_log
 
@@ -158,6 +166,37 @@ async def create_log_and_broadcast(
         except Exception:
             await log_db.rollback()
             raise
+
+
+async def start_test_scrap_job(
+    db: AsyncSession,
+    request: TestScrapRequest,
+) -> ScrapJobResponse:
+    """
+    Create and start a test scrap job with custom parameters.
+    Bypasses active job check; runs scraper with provided categories,
+    max pages, process_with_llm, and scroll options.
+    """
+    job_site = await get_job_site_by_id(db, request.job_site_id)
+    if job_site is None:
+        raise NotFoundException(detail="Job site not found")
+
+    meta_data = {
+        "load_more_on_scroll": request.load_more_on_scroll,
+        "max_scroll": request.max_scroll,
+    }
+    scrap_job = await create_scrap_job(
+        db,
+        {
+            "name": f"test_{int(datetime.now(timezone.utc).timestamp())}",
+            "job_site_id": request.job_site_id,
+            "status": ScrapJobStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    response = ScrapJobResponse.model_validate(scrap_job)
+    await broadcast_scrap_job_status(response.model_dump(), ScrapJobStatus.PENDING.value)
+    return response
 
 
 async def get_scrap_job_logs(

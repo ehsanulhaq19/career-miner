@@ -68,6 +68,24 @@ async def update_scrap_job_status(
     return scrap_job
 
 
+async def update_scrap_job_meta_data(
+    db: AsyncSession,
+    scrap_job_id: int,
+    meta_data: dict,
+) -> ScrapJob | None:
+    """Update or merge meta_data for an existing scrap job."""
+    scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
+    if scrap_job is None:
+        return None
+
+    existing = scrap_job.meta_data or {}
+    merged = {**existing, **meta_data}
+    scrap_job.meta_data = merged
+    await db.flush()
+    await db.refresh(scrap_job)
+    return scrap_job
+
+
 async def get_active_scrap_jobs_for_site(
     db: AsyncSession,
     job_site_id: int,

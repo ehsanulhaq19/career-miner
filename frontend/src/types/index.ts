@@ -61,6 +61,13 @@ export interface ScrapJob {
     | "error"
     | "terminated"
     | "stopped";
+  meta_data?: {
+    total_jobs_scraped_from_html?: number;
+    total_jobs_validated?: number;
+    total_jobs_created?: number;
+    load_more_on_scroll?: boolean;
+    max_scroll?: number;
+  };
   created_at: string;
   updated_at: string;
 }
