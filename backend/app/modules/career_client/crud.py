@@ -4,19 +4,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.career_client.models import CareerClient
 
 
+def _apply_has_email_filter(query, has_email_information: bool | None):
+    """Apply email filter to query when has_email_information is True."""
+    if has_email_information is not True:
+        return query
+    return query.where(func.json_array_length(CareerClient.emails) > 0)
+
+
 async def get_career_clients(
     db: AsyncSession,
     skip: int = 0,
     limit: int = 20,
+    has_email_information: bool | None = None,
 ) -> tuple[list[CareerClient], int]:
     """Retrieve a paginated list of career clients in descending order by id."""
-    query = (
-        select(CareerClient)
-        .order_by(CareerClient.id.desc())
-        .offset(skip)
-        .limit(limit)
-    )
+    base_query = select(CareerClient).order_by(CareerClient.id.desc())
+    base_query = _apply_has_email_filter(base_query, has_email_information)
+    query = base_query.offset(skip).limit(limit)
+
     count_query = select(func.count(CareerClient.id))
+    if has_email_information is True:
+        count_query = count_query.where(
+            func.json_array_length(CareerClient.emails) > 0
+        )
 
     result = await db.execute(query)
     items = list(result.scalars().all())
@@ -68,6 +78,41 @@ async def create_career_client(db: AsyncSession, data: dict) -> CareerClient:
     await db.flush()
     await db.refresh(career_client)
     return career_client
+
+
+async def update_career_client(
+    db: AsyncSession,
+    career_client_id: int,
+    data: dict,
+) -> CareerClient | None:
+    """Update an existing career client with the provided data."""
+    client = await get_career_client_by_id(db, career_client_id)
+    if client is None:
+        return None
+    for key, value in data.items():
+        if hasattr(client, key):
+            setattr(client, key, value)
+    await db.flush()
+    await db.refresh(client)
+    return client
+
+
+async def get_career_clients_without_emails(
+    db: AsyncSession,
+    limit: int = 1000,
+    client_ids: list[int] | None = None,
+) -> list[CareerClient]:
+    """Retrieve career clients that have no emails, optionally filtered by ids."""
+    query = select(CareerClient).where(
+        func.coalesce(func.json_array_length(CareerClient.emails), 0) == 0
+    )
+    if client_ids:
+        query = query.where(CareerClient.id.in_(client_ids))
+    query = query.where(CareerClient.name.isnot(None)).where(
+        CareerClient.name != ""
+    ).order_by(CareerClient.id.asc()).limit(limit)
+    result = await db.execute(query)
+    return list(result.scalars().all())
 
 
 async def get_total_career_clients_count(db: AsyncSession) -> int:

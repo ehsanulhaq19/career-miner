@@ -7,6 +7,7 @@ interface CareerClientState {
   total: number;
   page: number;
   limit: number;
+  hasEmailInformation: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -16,6 +17,7 @@ const initialState: CareerClientState = {
   total: 0,
   page: 1,
   limit: 20,
+  hasEmailInformation: false,
   loading: false,
   error: null,
 };
@@ -23,13 +25,18 @@ const initialState: CareerClientState = {
 export const fetchCareerClients = createAsyncThunk(
   "careerClient/fetchAll",
   async (
-    params?: { skip?: number; limit?: number },
+    params?: {
+      skip?: number;
+      limit?: number;
+      hasEmailInformation?: boolean;
+    },
     { rejectWithValue }
   ) => {
     try {
       return await careerClientService.getCareerClients(
         params?.skip ?? 0,
-        params?.limit ?? 20
+        params?.limit ?? 20,
+        params?.hasEmailInformation
       );
     } catch (error: any) {
       return rejectWithValue(
@@ -45,6 +52,9 @@ const careerClientSlice = createSlice({
   reducers: {
     setPage(state, action: PayloadAction<number>) {
       state.page = action.payload;
+    },
+    setHasEmailInformation(state, action: PayloadAction<boolean>) {
+      state.hasEmailInformation = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -66,5 +76,5 @@ const careerClientSlice = createSlice({
   },
 });
 
-export const { setPage } = careerClientSlice.actions;
+export const { setPage, setHasEmailInformation } = careerClientSlice.actions;
 export default careerClientSlice.reducer;

@@ -83,9 +83,44 @@ export interface ScrapJobLog {
   created_at: string;
 }
 
+export interface ScrapClientJob {
+  id: number;
+  name: string;
+  status:
+    | "pending"
+    | "in_progress"
+    | "completed"
+    | "error"
+    | "terminated"
+    | "stopped";
+  meta_data?: {
+    total?: number;
+    pending?: number;
+    processing?: number;
+    completed?: number;
+    failed?: number;
+    client_ids?: number[];
+    only_clients_without_emails?: boolean;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScrapClientLog {
+  id: number;
+  scrap_client_job_id: number;
+  action: string;
+  progress: number;
+  status: string;
+  details: string | null;
+  meta_data: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface CareerClient {
   id: number;
   emails: string[];
+  official_website?: string | null;
   name: string | null;
   location: string | null;
   detail: string | null;

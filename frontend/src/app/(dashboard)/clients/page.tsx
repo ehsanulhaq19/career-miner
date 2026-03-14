@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
@@ -9,28 +9,56 @@ import {
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchCareerClients,
+  setHasEmailInformation,
   setPage,
 } from "@/store/slices/careerClientSlice";
 import { CareerClient } from "@/types";
+import ClientDetailModal from "@/components/ClientDetailModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
-  const { items, total, page, limit, loading } = useAppSelector(
-    (state) => state.careerClient
+  const { items, total, page, limit, hasEmailInformation, loading } =
+    useAppSelector((state) => state.careerClient);
+  const [selectedClient, setSelectedClient] = useState<CareerClient | null>(
+    null
   );
 
   useEffect(() => {
     const skip = (page - 1) * limit;
-    dispatch(fetchCareerClients({ skip, limit }));
-  }, [dispatch, page, limit]);
+    dispatch(
+      fetchCareerClients({
+        skip,
+        limit,
+        hasEmailInformation: hasEmailInformation || undefined,
+      })
+    );
+  }, [dispatch, page, limit, hasEmailInformation]);
 
   const totalPages = Math.ceil(total / limit);
 
+  const handleHasEmailFilterChange = (checked: boolean) => {
+    dispatch(setHasEmailInformation(checked));
+    dispatch(setPage(1));
+  };
+
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-        Clients
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          Clients
+        </h2>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hasEmailInformation}
+            onChange={(e) => handleHasEmailFilterChange(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-300">
+            With emails only
+          </span>
+        </label>
+      </div>
 
       {loading && items.length === 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -56,7 +84,11 @@ export default function ClientsPage() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {items.map((client) => (
-              <ClientCard key={client.id} client={client} />
+              <ClientCard
+                key={client.id}
+                client={client}
+                onClick={() => setSelectedClient(client)}
+              />
             ))}
           </div>
 
@@ -87,13 +119,36 @@ export default function ClientsPage() {
           )}
         </>
       )}
+
+      <ClientDetailModal
+        clientId={selectedClient?.id ?? null}
+        isOpen={!!selectedClient}
+        onClose={() => setSelectedClient(null)}
+      />
     </div>
   );
 }
 
-function ClientCard({ client }: { client: CareerClient }) {
+function ClientCard({
+  client,
+  onClick,
+}: {
+  client: CareerClient;
+  onClick: () => void;
+}) {
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-5">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-5 cursor-pointer hover:border-primary-300 dark:hover:border-primary-600 transition-colors"
+    >
       <h3 className="font-semibold text-gray-900 dark:text-white line-clamp-1 mb-2">
         {client.name || "Unnamed Client"}
       </h3>
@@ -124,6 +179,16 @@ function ClientCard({ client }: { client: CareerClient }) {
             </span>
           )}
         </div>
+      )}
+      {client.official_website && (
+        <a
+          href={client.official_website}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 block text-xs text-primary-600 dark:text-primary-400 hover:underline truncate"
+        >
+          {client.official_website}
+        </a>
       )}
       {client.link && (
         <a

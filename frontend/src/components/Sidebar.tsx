@@ -9,6 +9,7 @@ import {
   HiOutlineCpuChip,
   HiOutlineUser,
   HiOutlineUserGroup,
+  HiOutlineEnvelope,
   HiOutlineArrowRightOnRectangle,
 } from "react-icons/hi2";
 import { useAppDispatch } from "@/store/store";
@@ -18,6 +19,7 @@ const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: HiOutlineHome },
   { label: "Job Sites", href: "/job-sites", icon: HiOutlineGlobeAlt },
   { label: "Scrap Jobs", href: "/scrap-jobs", icon: HiOutlineCpuChip },
+  { label: "Scrap Clients", href: "/scrap-clients", icon: HiOutlineEnvelope },
   { label: "Jobs", href: "/jobs", icon: HiOutlineBriefcase },
   { label: "Clients", href: "/clients", icon: HiOutlineUserGroup },
   { label: "Profile", href: "/profile", icon: HiOutlineUser },

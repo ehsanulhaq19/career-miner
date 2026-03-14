@@ -10,6 +10,7 @@ class CareerClient(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     emails = Column(JSON, default=list)
+    official_website = Column(Text, nullable=True)
     name = Column(String(500), nullable=True)
     location = Column(String(500), nullable=True)
     detail = Column(Text, nullable=True)

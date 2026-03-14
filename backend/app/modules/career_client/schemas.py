@@ -10,6 +10,7 @@ class CareerClientResponse(BaseModel):
 
     id: int
     emails: list[str] = []
+    official_website: str | None = None
     name: str | None
     location: str | None
     detail: str | None

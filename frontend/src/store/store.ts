@@ -7,6 +7,7 @@ import careerJobReducer from "./slices/careerJobSlice";
 import careerClientReducer from "./slices/careerClientSlice";
 import dashboardReducer from "./slices/dashboardSlice";
 import scrapJobReducer from "./slices/scrapJobSlice";
+import scrapClientReducer from "./slices/scrapClientSlice";
 
 export const store = configureStore({
   reducer: {
@@ -17,6 +18,7 @@ export const store = configureStore({
     careerClient: careerClientReducer,
     dashboard: dashboardReducer,
     scrapJob: scrapJobReducer,
+    scrapClient: scrapClientReducer,
   },
 });
 
