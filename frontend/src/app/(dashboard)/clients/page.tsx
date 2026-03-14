@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
+  HiOutlinePencilSquare,
   HiOutlineUserGroup,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
@@ -14,6 +15,7 @@ import {
 } from "@/store/slices/careerClientSlice";
 import { CareerClient } from "@/types";
 import ClientDetailModal from "@/components/ClientDetailModal";
+import BulkEditModal from "@/components/BulkEditModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
@@ -22,6 +24,18 @@ export default function ClientsPage() {
   const [selectedClient, setSelectedClient] = useState<CareerClient | null>(
     null
   );
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  const refetch = () => {
+    const skip = (page - 1) * limit;
+    dispatch(
+      fetchCareerClients({
+        skip,
+        limit,
+        hasEmailInformation: hasEmailInformation || undefined,
+      })
+    );
+  };
 
   useEffect(() => {
     const skip = (page - 1) * limit;
@@ -47,17 +61,26 @@ export default function ClientsPage() {
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
           Clients
         </h2>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={hasEmailInformation}
-            onChange={(e) => handleHasEmailFilterChange(e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
-          />
-          <span className="text-sm text-gray-700 dark:text-gray-300">
-            With emails only
-          </span>
-        </label>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setBulkEditOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlinePencilSquare className="w-4 h-4" />
+            Bulk Edit
+          </button>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={hasEmailInformation}
+              onChange={(e) => handleHasEmailFilterChange(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+            />
+            <span className="text-sm text-gray-700 dark:text-gray-300">
+              With emails only
+            </span>
+          </label>
+        </div>
       </div>
 
       {loading && items.length === 0 ? (
@@ -124,6 +147,12 @@ export default function ClientsPage() {
         clientId={selectedClient?.id ?? null}
         isOpen={!!selectedClient}
         onClose={() => setSelectedClient(null)}
+        onUpdated={refetch}
+      />
+      <BulkEditModal
+        isOpen={bulkEditOpen}
+        onClose={() => setBulkEditOpen(false)}
+        onUpdated={refetch}
       />
     </div>
   );

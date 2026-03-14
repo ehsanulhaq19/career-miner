@@ -17,12 +17,18 @@ async def get_career_clients(
     limit: int = 20,
     has_email_information: bool | None = None,
 ) -> tuple[list[CareerClient], int]:
-    """Retrieve a paginated list of career clients in descending order by id."""
-    base_query = select(CareerClient).order_by(CareerClient.id.desc())
+    """Retrieve a paginated list of active career clients in descending order by id."""
+    base_query = (
+        select(CareerClient)
+        .where(CareerClient.is_active.is_(True))
+        .order_by(CareerClient.id.desc())
+    )
     base_query = _apply_has_email_filter(base_query, has_email_information)
     query = base_query.offset(skip).limit(limit)
 
-    count_query = select(func.count(CareerClient.id))
+    count_query = select(func.count(CareerClient.id)).where(
+        CareerClient.is_active.is_(True)
+    )
     if has_email_information is True:
         count_query = count_query.where(
             func.json_array_length(CareerClient.emails) > 0
@@ -119,6 +125,35 @@ async def get_total_career_clients_count(db: AsyncSession) -> int:
     """Return the total count of all career clients."""
     result = await db.execute(select(func.count(CareerClient.id)))
     return result.scalar() or 0
+
+
+async def bulk_update_career_clients_by_location(
+    db: AsyncSession, location: str, data: dict
+) -> int:
+    """Update all career clients with the given location. Returns count of updated rows."""
+    from sqlalchemy import update
+
+    stmt = (
+        update(CareerClient)
+        .where(CareerClient.location == location)
+        .values(**data)
+    )
+    result = await db.execute(stmt)
+    return result.rowcount or 0
+
+
+async def get_distinct_career_client_locations(
+    db: AsyncSession,
+) -> list[str]:
+    """Retrieve all distinct non-null, non-empty location values from career clients."""
+    result = await db.execute(
+        select(CareerClient.location)
+        .where(CareerClient.location.isnot(None))
+        .where(CareerClient.location != "")
+        .distinct()
+        .order_by(CareerClient.location)
+    )
+    return [row[0] for row in result.all() if row[0]]
 
 
 async def get_or_create_career_client(

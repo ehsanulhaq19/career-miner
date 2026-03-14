@@ -126,6 +126,7 @@ export interface CareerClient {
   detail: string | null;
   link: string | null;
   size: string | null;
+  is_active: boolean;
   created_at: string;
 }
 

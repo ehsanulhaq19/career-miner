@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String, Text, func
 
 from app.database import Base
 
@@ -16,4 +16,5 @@ class CareerClient(Base):
     detail = Column(Text, nullable=True)
     link = Column(Text, nullable=True)
     size = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())

@@ -1,6 +1,20 @@
 import api from "./api";
 import { CareerClient, PaginatedResponse } from "@/types";
 
+export interface CareerClientUpdatePayload {
+  emails?: string[];
+  name?: string | null;
+  official_website?: string | null;
+  location?: string | null;
+  link?: string | null;
+  detail?: string | null;
+  is_active?: boolean;
+}
+
+export interface CareerClientBulkUpdatePayload {
+  is_active?: boolean;
+}
+
 export const careerClientService = {
   async getCareerClients(
     skip = 0,
@@ -22,6 +36,30 @@ export const careerClientService = {
   },
   async getCareerClientById(id: number) {
     const { data } = await api.get<CareerClient>(`/career-clients/${id}`);
+    return data;
+  },
+  async updateCareerClient(id: number, payload: CareerClientUpdatePayload) {
+    const { data } = await api.put<CareerClient>(
+      `/career-clients/${id}`,
+      payload
+    );
+    return data;
+  },
+  async getCareerClientLocations() {
+    const { data } = await api.get<{ locations: string[] }>(
+      "/career-clients/locations"
+    );
+    return data;
+  },
+  async bulkUpdateCareerClientsByLocation(
+    location: string,
+    payload: CareerClientBulkUpdatePayload
+  ) {
+    const { data } = await api.put<{ updated_count: number }>(
+      "/career-clients/bulk-update/location",
+      payload,
+      { params: { location } }
+    );
     return data;
   },
 };

@@ -2,22 +2,29 @@
 
 import { useEffect, useState } from "react";
 import { HiXMark } from "react-icons/hi2";
-import { careerClientService } from "@/services/careerClientService";
+import {
+  careerClientService,
+  CareerClientUpdatePayload,
+} from "@/services/careerClientService";
 import { CareerClient } from "@/types";
 
 interface ClientDetailModalProps {
   clientId: number | null;
   isOpen: boolean;
   onClose: () => void;
+  onUpdated?: () => void;
 }
 
 export default function ClientDetailModal({
   clientId,
   isOpen,
   onClose,
+  onUpdated,
 }: ClientDetailModalProps) {
   const [client, setClient] = useState<CareerClient | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formData, setFormData] = useState<CareerClientUpdatePayload>({});
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -36,14 +43,54 @@ export default function ClientDetailModal({
   useEffect(() => {
     if (!isOpen || !clientId) {
       setClient(null);
+      setFormData({});
       return;
     }
     setLoading(true);
     careerClientService
       .getCareerClientById(clientId)
-      .then(setClient)
+      .then((data) => {
+        setClient(data);
+        setFormData({
+          emails: data.emails ?? [],
+          name: data.name ?? "",
+          official_website: data.official_website ?? "",
+          location: data.location ?? "",
+          link: data.link ?? "",
+          detail: data.detail ?? "",
+          is_active: data.is_active ?? true,
+        });
+      })
       .finally(() => setLoading(false));
   }, [isOpen, clientId]);
+
+  const handleChange = (
+    field: keyof CareerClientUpdatePayload,
+    value: string | string[] | boolean | null
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleEmailsChange = (value: string) => {
+    const emails = value
+      .split(",")
+      .map((e) => e.trim())
+      .filter(Boolean);
+    handleChange("emails", emails);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clientId) return;
+    setSaving(true);
+    try {
+      await careerClientService.updateCareerClient(clientId, formData);
+      onUpdated?.();
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -59,7 +106,7 @@ export default function ClientDetailModal({
       >
         <div className="sticky top-0 flex items-center justify-between p-6 pb-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white pr-8">
-            {loading ? "Loading..." : client?.name || "Client Details"}
+            {loading ? "Loading..." : client?.name || "Edit Client"}
           </h2>
           <button
             onClick={onClose}
@@ -69,7 +116,7 @@ export default function ClientDetailModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {loading ? (
             <div className="animate-pulse space-y-4">
               <div className="h-4 w-3/4 bg-gray-200 dark:bg-gray-700 rounded" />
@@ -78,116 +125,111 @@ export default function ClientDetailModal({
             </div>
           ) : client ? (
             <>
-              {client.name && (
-                <div>
-                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Name
-                  </span>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {client.name}
-                  </p>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={(formData.name as string) ?? ""}
+                  onChange={(e) => handleChange("name", e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
 
-              {client.location && (
-                <div>
-                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Location
-                  </span>
-                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                    {client.location}
-                  </p>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Location
+                </label>
+                <input
+                  type="text"
+                  value={(formData.location as string) ?? ""}
+                  onChange={(e) => handleChange("location", e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
 
-              {client.size && (
-                <div>
-                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Size
-                  </span>
-                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                    {client.size}
-                  </p>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Emails (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={(formData.emails as string[])?.join(", ") ?? ""}
+                  onChange={(e) => handleEmailsChange(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
 
-              {client.detail && (
-                <div>
-                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Detail
-                  </span>
-                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                    {client.detail}
-                  </p>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Official Website
+                </label>
+                <input
+                  type="text"
+                  value={(formData.official_website as string) ?? ""}
+                  onChange={(e) =>
+                    handleChange("official_website", e.target.value)
+                  }
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
 
-              {client.emails && client.emails.length > 0 && (
-                <div>
-                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Emails
-                  </span>
-                  <div className="mt-1 space-y-1">
-                    {client.emails.map((email) => (
-                      <a
-                        key={email}
-                        href={`mailto:${email}`}
-                        className="block text-sm text-primary-600 dark:text-primary-400 hover:underline"
-                      >
-                        {email}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Link
+                </label>
+                <input
+                  type="text"
+                  value={(formData.link as string) ?? ""}
+                  onChange={(e) => handleChange("link", e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
 
-              {client.official_website && (
-                <div>
-                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Official Website
-                  </span>
-                  <p className="mt-1">
-                    <a
-                      href={client.official_website}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary-600 dark:text-primary-400 hover:underline break-all"
-                    >
-                      {client.official_website}
-                    </a>
-                  </p>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                  Detail
+                </label>
+                <textarea
+                  value={(formData.detail as string) ?? ""}
+                  onChange={(e) => handleChange("detail", e.target.value)}
+                  rows={4}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
 
-              {client.link && (
-                <div>
-                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Link
-                  </span>
-                  <p className="mt-1">
-                    <a
-                      href={client.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary-600 dark:text-primary-400 hover:underline break-all"
-                    >
-                      {client.link}
-                    </a>
-                  </p>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="is_active"
+                  checked={(formData.is_active as boolean) ?? true}
+                  onChange={(e) => handleChange("is_active", e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
+                />
+                <label
+                  htmlFor="is_active"
+                  className="text-sm text-gray-700 dark:text-gray-300"
+                >
+                  Active
+                </label>
+              </div>
 
-              <div className="pt-3 border-t border-gray-200 dark:border-gray-800">
-                <span className="text-xs text-gray-400">
-                  Created{" "}
-                  {new Date(client.created_at).toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
               </div>
             </>
           ) : (
@@ -197,7 +239,7 @@ export default function ClientDetailModal({
               </p>
             )
           )}
-        </div>
+        </form>
       </div>
     </div>
   );
