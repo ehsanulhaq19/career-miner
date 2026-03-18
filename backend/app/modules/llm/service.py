@@ -1,7 +1,11 @@
 from app.config import get_settings
 from app.core.exceptions import BadRequestException
 from app.modules.llm.models import BaseLLMClient
+from app.modules.llm.providers.gemini import GeminiLLMClient
 from app.modules.llm.providers.grok import GrokLLMClient
+
+DEFAULT_WEB_SEARCH_MODEL = "gemini-2.5-flash"
+DEFAULT_WEB_SEARCH_PROVIDER = "gemini"
 
 
 class LLMFactory:
@@ -9,6 +13,7 @@ class LLMFactory:
 
     _PROVIDERS: dict[str, type[BaseLLMClient]] = {
         "grok": GrokLLMClient,
+        "gemini": GeminiLLMClient,
     }
 
     @classmethod
@@ -44,3 +49,8 @@ class LLMFactory:
             List of provider identifiers that can be used with get_client.
         """
         return list(cls._PROVIDERS.keys())
+
+    @classmethod
+    def get_web_search_providers(cls) -> list[str]:
+        """Return providers that support web search."""
+        return ["gemini", "grok"]

@@ -15,4 +15,6 @@ def get_provider_config(provider_name: str) -> dict:
     provider_key = provider_name.lower()
     if provider_key == "grok":
         return {"api_key": getattr(settings, "XAI_API_KEY", "") or ""}
+    if provider_key == "gemini":
+        return {"api_key": getattr(settings, "GEMINI_API_KEY", "") or ""}
     return {}

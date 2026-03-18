@@ -87,3 +87,23 @@ async def validate_emails_smtp(emails: list[str]) -> list[str]:
         if await validate_email_smtp(email):
             valid.append(email)
     return valid
+
+
+async def validate_emails_by_domain(emails: list[str]) -> list[str]:
+    """
+    Validate emails by verifying their domains have MX records.
+    More reliable than SMTP in containerized environments where port 25 is blocked.
+    Caches domain lookups to avoid redundant DNS queries.
+    """
+    valid: list[str] = []
+    domain_mx_cache: dict[str, bool] = {}
+    for email in emails:
+        domain = _extract_domain(email)
+        if not domain:
+            continue
+        if domain not in domain_mx_cache:
+            mx_host = await asyncio.to_thread(_get_mx_host, domain)
+            domain_mx_cache[domain] = mx_host is not None
+        if domain_mx_cache[domain]:
+            valid.append(email)
+    return valid

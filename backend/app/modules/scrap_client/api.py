@@ -1,5 +1,7 @@
 """Scrap client API endpoints."""
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +29,7 @@ from app.modules.scrap_client.service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 async def _run_scraper_background(
@@ -37,13 +40,22 @@ async def _run_scraper_background(
     is_test_mode: bool = False,
 ) -> None:
     """Execute client email scraper in background."""
-    await _run_client_email_scraper(
-        scrap_client_job_id,
-        client_ids,
-        only_clients_without_emails,
-        url=url,
-        is_test_mode=is_test_mode,
+    logger.info(
+        "Background scraper enter: job_id=%s, client_ids=%s, only_without_emails=%s, url=%s, is_test=%s",
+        scrap_client_job_id, client_ids, only_clients_without_emails, url, is_test_mode,
     )
+    try:
+        await _run_client_email_scraper(
+            scrap_client_job_id,
+            client_ids,
+            only_clients_without_emails,
+            url=url,
+            is_test_mode=is_test_mode,
+        )
+        logger.info("Background scraper completed: job_id=%s", scrap_client_job_id)
+    except Exception as e:
+        logger.exception("Background scraper failed: job_id=%s, error=%s", scrap_client_job_id, e)
+        raise
 
 
 @router.post("/start", response_model=ScrapClientJobResponse, status_code=201)
@@ -55,6 +67,7 @@ async def start_scrap_client_job_endpoint(
 ) -> ScrapClientJobResponse:
     """Create and start a new scrap client job for email fetching."""
     result = await start_scrap_client_job(db, request)
+    logger.info("Scrap client job created: id=%s, adding background task", result.id)
     background_tasks.add_task(
         _run_scraper_background,
         result.id,
@@ -73,6 +86,7 @@ async def test_scrap_client_job_endpoint(
 ) -> ScrapClientJobResponse:
     """Create and start a test scrap client job. Does not save to database."""
     result = await start_test_scrap_client_job(db, request)
+    logger.info("Test scrap client job created: id=%s, adding background task", result.id)
     background_tasks.add_task(
         _run_scraper_background,
         result.id,
@@ -100,6 +114,7 @@ async def stop_scrap_client_job_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
     """Stop a scrap client job that is currently in progress."""
+    logger.info("Stopping scrap client job: id=%s", scrap_client_job_id)
     return await stop_scrap_client_job(db, scrap_client_job_id)
 
 
@@ -111,6 +126,7 @@ async def resume_scrap_client_job_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
     """Resume a stopped scrap client job."""
+    logger.info("Resuming scrap client job: id=%s", scrap_client_job_id)
     result = await resume_scrap_client_job(db, scrap_client_job_id)
     from app.modules.scrap_client.crud import get_scrap_client_job_by_id
 

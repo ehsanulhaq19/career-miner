@@ -18,9 +18,13 @@ HIGH_VALUE_PATHS = [
     "/contact",
     "/contact-us",
     "/contact_us",
+    "/contactus",
     "/about",
     "/about-us",
+    "/about_us",
+    "/aboutus",
     "/team",
+    "/our-team",
     "/careers",
     "/jobs",
     "/support",
@@ -29,7 +33,18 @@ HIGH_VALUE_PATHS = [
     "/talent",
     "/hr",
     "/people",
+    "/impressum",
+    "/kontakt",
+    "/inquiry",
+    "/enquiry",
+    "/get-in-touch",
 ]
+
+CONTACT_LINK_KEYWORDS = {
+    "contact", "about", "team", "career", "job", "support",
+    "hr", "people", "impressum", "kontakt", "inquiry", "enquiry",
+    "talent", "recruiting", "get-in-touch", "reach-us",
+}
 
 
 def _browser_headers(base_url: str) -> dict:
@@ -115,9 +130,39 @@ class WebsiteCrawler:
                     results.append((url_norm, html))
                     if on_page_fetched:
                         on_page_fetched(url_norm, html)
+                    self._discover_contact_links(
+                        html, base_origin, netloc, visited, to_visit
+                    )
                 delay = random.uniform(self.delay_min, self.delay_max)
                 await asyncio.sleep(delay)
         return results
+
+    @staticmethod
+    def _discover_contact_links(
+        html: str,
+        base_origin: str,
+        netloc: str,
+        visited: set[str],
+        to_visit: list[str],
+    ) -> None:
+        """Extract contact-related links from crawled HTML and append them to the visit queue."""
+        try:
+            soup = BeautifulSoup(html, "lxml")
+            for a_tag in soup.find_all("a", href=True):
+                href = a_tag.get("href", "")
+                link_url = normalize_url(href, base_origin)
+                if not link_url:
+                    continue
+                link_parsed = urlparse(link_url)
+                if link_parsed.netloc.lower() != netloc.lower():
+                    continue
+                if link_url in visited or link_url in to_visit:
+                    continue
+                path_lower = link_parsed.path.lower()
+                if any(kw in path_lower for kw in CONTACT_LINK_KEYWORDS):
+                    to_visit.append(link_url)
+        except Exception:
+            pass
 
     async def _fetch_with_retry(
         self, client: httpx.AsyncClient, url: str
