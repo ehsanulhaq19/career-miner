@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = ""
     SMTP_USE_TLS: bool = True
+    RESUME_UPLOAD_FOLDER: str = "uploads/resumes"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

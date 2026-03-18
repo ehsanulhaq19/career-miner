@@ -17,3 +17,4 @@ openai>=1.0.0
 google-genai>=1.0.0
 dnspython>=2.4.0
 aiosmtplib>=3.0.0
+pypdf>=5.0.0

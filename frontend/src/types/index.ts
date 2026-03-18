@@ -164,3 +164,14 @@ export interface AuthState {
 export interface ThemeState {
   mode: "light" | "dark";
 }
+
+export interface Resume {
+  id: number;
+  name: string;
+  size: number;
+  extension: string;
+  content: string | null;
+  uploaded_by_id: number;
+  is_active: boolean;
+  created_at: string;
+}

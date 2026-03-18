@@ -11,6 +11,7 @@ from app.modules.career_job.api import router as career_job_router
 from app.modules.career_job.api import dashboard_router
 from app.modules.job_site.api import router as job_site_router
 from app.modules.scrap_job.api import router as scrap_job_router
+from app.modules.resume.api import router as resume_router
 from app.modules.scrap_client.api import router as scrap_client_router
 from app.modules.email.api import router as email_router
 from app.modules.llm.api import router as llm_router
@@ -46,6 +47,7 @@ app.include_router(career_job_router, prefix="/api/career-jobs", tags=["Career J
 app.include_router(career_client_router, prefix="/api/career-clients", tags=["Career Clients"])
 app.include_router(scrap_job_router, prefix="/api/scrap-jobs", tags=["Scrap Jobs"])
 app.include_router(scrap_client_router, prefix="/api/scrap-clients", tags=["Scrap Clients"])
+app.include_router(resume_router, prefix="/api/resumes", tags=["Resumes"])
 app.include_router(email_router, prefix="/api/email", tags=["Email"])
 app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(llm_router, prefix="/api/llm", tags=["LLM"])
