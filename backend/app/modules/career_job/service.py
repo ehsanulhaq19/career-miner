@@ -26,17 +26,22 @@ async def list_career_jobs(
     skip: int = 0,
     limit: int = 20,
     job_site_id: int | None = None,
+    career_client_id: int | None = None,
     category: str | None = None,
     search: str | None = None,
     user_id: int | None = None,
     show_unseen_jobs: bool = False,
 ) -> CareerJobListResponse:
-    """Return a paginated list of career jobs with job site names."""
+    """
+    Return a paginated list of career jobs with job site names.
+    Results are ordered by created_at descending.
+    """
     items, total = await get_career_jobs(
         db,
         skip=skip,
         limit=limit,
         job_site_id=job_site_id,
+        career_client_id=career_client_id,
         category=category,
         search=search,
         user_id=user_id,

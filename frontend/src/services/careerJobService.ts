@@ -6,6 +6,7 @@ export const careerJobService = {
     skip?: number;
     limit?: number;
     job_site_id?: number;
+    career_client_id?: number;
     category?: string;
     search?: string;
     show_unseen_jobs?: boolean;

@@ -27,18 +27,23 @@ async def list_career_jobs_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=500),
     job_site_id: int | None = Query(None),
+    career_client_id: int | None = Query(None),
     category: str | None = Query(None),
     search: str | None = Query(None),
     show_unseen_jobs: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CareerJobListResponse:
-    """List all career jobs with optional filtering and pagination."""
+    """
+    List career jobs with optional filtering and pagination.
+    Use career_client_id to filter jobs by client. Results are in desc order.
+    """
     return await list_career_jobs(
         db,
         skip=skip,
         limit=limit,
         job_site_id=job_site_id,
+        career_client_id=career_client_id,
         category=category,
         search=search,
         user_id=current_user.id,

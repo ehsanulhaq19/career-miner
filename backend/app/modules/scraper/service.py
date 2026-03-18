@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.modules.career_client.crud import get_or_create_career_client
 from app.modules.career_job.crud import (
-    check_job_exists_by_title_and_links,
+    check_job_exist,
     create_career_job,
 )
 from app.modules.llm.service import LLMFactory
@@ -155,17 +155,13 @@ class ScraperService:
                         meta_data={"url": url, "page_index": pages_scraped},
                     )
                     try:
-                        print("----------------load_more_on_scroll: ", load_more_on_scroll)
                         if load_more_on_scroll:
-                            print("----------------fetching page with scroll")
                             html, final_url = await self._fetch_page_with_scroll(
                                 url, max_scroll=max_scroll
                             )
-                            print("----------------scroll html length: ", len(html))
                         else:
-                            print("----------------fetching page")
                             html, final_url = await self._fetch_page(client, url)
-                            print("----------------html length: ", len(html))
+                            
                     except Exception as e:
                         logger.warning("Failed to fetch %s: %s", url, e)
                         await create_log_and_broadcast(
@@ -225,7 +221,7 @@ class ScraperService:
                             job_data, effective_categories
                         ):
                             continue
-                        exists = await check_job_exists_by_title_and_links(
+                        exists = await check_job_exist(
                             db,
                             title=job_data["title"],
                             job_site_id=job_site.id,
@@ -334,6 +330,16 @@ class ScraperService:
                         }
                         if career_client:
                             career_job_data["career_client_id"] = career_client.id
+                        
+                        exists = await check_job_exist(
+                            db,
+                            title=job_data["title"],
+                            job_site_id=job_site.id,
+                            career_client_id=career_client.id,
+                        )
+                        if not exists:
+                            continue
+                        
                         await create_career_job(db, career_job_data)
                         await db.commit()
                         saved_count += 1

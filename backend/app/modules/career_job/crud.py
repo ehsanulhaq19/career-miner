@@ -72,18 +72,28 @@ async def get_career_jobs(
     skip: int = 0,
     limit: int = 20,
     job_site_id: int | None = None,
+    career_client_id: int | None = None,
     category: str | None = None,
     search: str | None = None,
     user_id: int | None = None,
     show_unseen_jobs: bool = False,
 ) -> tuple[list[CareerJob], int]:
-    """Retrieve a paginated list of career jobs with optional filters."""
+    """
+    Retrieve a paginated list of career jobs with optional filters.
+    Results are ordered by created_at descending.
+    """
     query = select(CareerJob)
     count_query = select(func.count(CareerJob.id))
 
     if job_site_id is not None:
         query = query.where(CareerJob.job_site_id == job_site_id)
         count_query = count_query.where(CareerJob.job_site_id == job_site_id)
+
+    if career_client_id is not None:
+        query = query.where(CareerJob.career_client_id == career_client_id)
+        count_query = count_query.where(
+            CareerJob.career_client_id == career_client_id
+        )
 
     if search is not None:
         query = query.where(CareerJob.title.ilike(f"%{search}%"))
@@ -145,23 +155,20 @@ async def check_duplicate_job(
     return result.scalars().first()
 
 
-async def check_job_exists_by_title_and_links(
+async def check_job_exist(
     db: AsyncSession,
     title: str,
     job_site_id: int,
-    links: list[str],
-) -> bool:
-    """
-    Check if a CareerJob exists with same title and one of the links as url.
+    career_client_id: int | None = None,
+    links: list[str] | None = None,
+) -> CareerJob | None:
+    """Check if a career job with the same title, job_site_id and career_client_id already exists."""
 
-    Returns True if a matching job exists, False otherwise.
-    """
-    if not links:
-        return False
     query = select(CareerJob).where(
         CareerJob.title == title,
         CareerJob.job_site_id == job_site_id,
-        CareerJob.url.in_(links),
+        CareerJob.career_client_id == career_client_id if career_client_id is not None else None,
+        CareerJob.url.in_(links) if links is not None else None,
     )
     result = await db.execute(query)
     return result.scalars().first() is not None
