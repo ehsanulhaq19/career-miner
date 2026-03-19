@@ -1,9 +1,18 @@
 import api from "./api";
-import { JobApplication, PaginatedResponse } from "@/types";
+import {
+  BulkJobApplicationLog,
+  JobApplication,
+  PaginatedResponse,
+} from "@/types";
 
 export interface CreateJobApplicationPayload {
   career_job_id: number;
   resume_id: number;
+}
+
+export interface BulkJobApplicationCreatePayload {
+  resume_id: number;
+  career_job_ids: number[];
 }
 
 export interface JobApplicationUpdatePayload {
@@ -48,6 +57,21 @@ export const jobApplicationService = {
     const { data } = await api.post<JobApplication>(
       "/job-applications",
       payload
+    );
+    return data;
+  },
+
+  async createBulkJobApplications(payload: BulkJobApplicationCreatePayload) {
+    const { data } = await api.post<{ id: number; status: string }>(
+      "/job-applications/bulk",
+      payload
+    );
+    return data;
+  },
+
+  async getBulkJobApplicationLogs(bulkJobApplicationId: number) {
+    const { data } = await api.get<{ items: BulkJobApplicationLog[] }>(
+      `/job-applications/bulk/${bulkJobApplicationId}/logs`
     );
     return data;
   },

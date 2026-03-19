@@ -1,7 +1,12 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.job_application.models import JobApplication
+from app.modules.job_application.models import (
+    BulkJobApplication,
+    BulkJobApplicationLog,
+    BulkJobApplicationStatus,
+    JobApplication,
+)
 
 
 async def create_job_application(db: AsyncSession, data: dict) -> JobApplication:
@@ -57,6 +62,84 @@ async def get_job_application_by_id(
         .where(JobApplication.user_id == user_id)
     )
     return result.scalars().first()
+
+
+async def get_bulk_job_application_by_id(
+    db: AsyncSession, bulk_job_application_id: int
+) -> BulkJobApplication | None:
+    """Retrieve a single bulk job application by its primary key."""
+    result = await db.execute(
+        select(BulkJobApplication).where(BulkJobApplication.id == bulk_job_application_id)
+    )
+    return result.scalars().first()
+
+
+async def create_bulk_job_application(
+    db: AsyncSession, data: dict
+) -> BulkJobApplication:
+    """Create a new bulk job application record from the provided data dictionary."""
+    bulk_job_application = BulkJobApplication(**data)
+    db.add(bulk_job_application)
+    await db.flush()
+    await db.refresh(bulk_job_application)
+    return bulk_job_application
+
+
+async def create_bulk_job_application_log(
+    db: AsyncSession,
+    bulk_job_application_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "pending",
+    details: str | None = None,
+    meta_data: dict | None = None,
+) -> BulkJobApplicationLog:
+    """Create a new bulk job application log entry."""
+    log = BulkJobApplicationLog(
+        bulk_job_application_id=bulk_job_application_id,
+        action=action,
+        progress=progress,
+        status=status,
+        details=details,
+        meta_data=meta_data or {},
+    )
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+    return log
+
+
+async def get_bulk_job_application_logs_by_id(
+    db: AsyncSession,
+    bulk_job_application_id: int,
+) -> list[BulkJobApplicationLog]:
+    """Retrieve all log entries for a bulk job application ordered by creation time."""
+    result = await db.execute(
+        select(BulkJobApplicationLog)
+        .where(BulkJobApplicationLog.bulk_job_application_id == bulk_job_application_id)
+        .order_by(BulkJobApplicationLog.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def update_bulk_job_application_status(
+    db: AsyncSession,
+    bulk_job_application_id: int,
+    status: str | BulkJobApplicationStatus,
+) -> BulkJobApplication | None:
+    """Update the status of an existing bulk job application."""
+    bulk_job_application = await get_bulk_job_application_by_id(
+        db, bulk_job_application_id
+    )
+    if bulk_job_application is None:
+        return None
+    status_value = (
+        status.value if isinstance(status, BulkJobApplicationStatus) else status
+    )
+    bulk_job_application.status = status_value
+    await db.flush()
+    await db.refresh(bulk_job_application)
+    return bulk_job_application
 
 
 async def update_job_application(

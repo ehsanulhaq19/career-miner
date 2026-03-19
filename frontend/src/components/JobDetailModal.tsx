@@ -50,6 +50,55 @@ export default function JobDetailModal({ job, isOpen, onClose }: JobDetailModalP
         </div>
 
         <div className="p-6 space-y-5">
+          {(job.career_client_name || (job.career_client_emails?.length ?? 0) > 0 || job.career_client_official_website) && (
+            <div>
+              <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                Client
+              </span>
+              {job.career_client_name && (
+                <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                  {job.career_client_name}
+                </p>
+              )}
+              {(job.career_client_emails?.length ?? 0) > 0 && (
+                <div className="mt-2">
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 block mb-1">
+                    Client Emails
+                  </span>
+                  <div className="space-y-1">
+                    {(job.career_client_emails ?? []).map((email) => (
+                      <a
+                        key={email}
+                        href={`mailto:${email}`}
+                        className="block text-sm text-primary-600 dark:text-primary-400 hover:underline"
+                      >
+                        {email}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {job.career_client_official_website && (
+                <div className="mt-2">
+                  <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 block mb-1">
+                    Official Website
+                  </span>
+                  <a
+                    href={
+                      job.career_client_official_website.startsWith("http")
+                        ? job.career_client_official_website
+                        : `https://${job.career_client_official_website}`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary-600 dark:text-primary-400 hover:underline break-all"
+                  >
+                    {job.career_client_official_website}
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
           {job.job_site_name && (
             <div>
               <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">

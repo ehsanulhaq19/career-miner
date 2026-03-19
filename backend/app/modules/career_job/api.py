@@ -5,13 +5,17 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.career_job.schemas import (
+    CareerJobDateGroupListResponse,
     CareerJobDetailResponse,
     CareerJobListResponse,
+    CareerJobWithCountsListResponse,
     DashboardStatsResponse,
     MarkJobSeenRequest,
 )
 from app.modules.career_job.service import (
     get_career_job,
+    get_career_job_dates_grouped,
+    get_career_jobs_by_date,
     get_dashboard_stats,
     list_career_jobs,
     mark_all_jobs_seen,
@@ -50,6 +54,40 @@ async def list_career_jobs_endpoint(
         user_id=current_user.id,
         show_unseen_jobs=show_unseen_jobs,
         has_client_emails=has_client_emails,
+    )
+
+
+@router.get("/grouped-by-date", response_model=CareerJobDateGroupListResponse)
+async def get_career_job_dates_grouped_endpoint(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CareerJobDateGroupListResponse:
+    """
+    Return distinct dates with job counts, sorted by date descending.
+    Used for tabular UI - by default shows only date groups.
+    """
+    return await get_career_job_dates_grouped(db, skip=skip, limit=limit)
+
+
+@router.get("/by-date", response_model=CareerJobWithCountsListResponse)
+async def get_career_jobs_by_date_endpoint(
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CareerJobWithCountsListResponse:
+    """
+    Return career jobs for a specific date with active/inactive application counts.
+    """
+    return await get_career_jobs_by_date(
+        db,
+        target_date=date,
+        skip=skip,
+        limit=limit,
+        user_id=current_user.id,
     )
 
 

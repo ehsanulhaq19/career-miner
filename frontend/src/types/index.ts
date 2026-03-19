@@ -48,6 +48,8 @@ export interface CareerJob {
   updated_at: string;
   job_site_name?: string;
   career_client_name?: string;
+  career_client_emails?: string[];
+  career_client_official_website?: string | null;
   job_seen?: boolean;
 }
 
@@ -128,6 +130,28 @@ export interface ScrapClientJob {
   };
   created_at: string;
   updated_at: string;
+}
+
+export interface BulkJobApplicationLog {
+  id: number;
+  bulk_job_application_id: number;
+  action: string;
+  progress: number;
+  status: string;
+  details: string | null;
+  meta_data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CareerJobDateGroup {
+  date: string;
+  job_count: number;
+}
+
+export interface CareerJobWithApplicationCounts extends CareerJob {
+  career_client_id?: number | null;
+  active_application_count: number;
+  inactive_application_count: number;
 }
 
 export interface ScrapClientLog {

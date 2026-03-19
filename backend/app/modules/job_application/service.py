@@ -9,23 +9,34 @@ from app.config import get_settings
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.career_client.crud import get_career_client_by_id
 from app.modules.career_job.crud import get_career_job_by_id
+from app.database import async_session
 from app.modules.job_application.crud import (
+    create_bulk_job_application,
+    create_bulk_job_application_log,
     create_job_application,
+    get_bulk_job_application_by_id,
+    get_bulk_job_application_logs_by_id,
     get_job_application_by_id,
     get_job_applications,
+    update_bulk_job_application_status,
     update_job_application as crud_update_job_application,
 )
 from app.modules.job_application.prompts import (
     JOB_APPLICATION_SYSTEM_PROMPT,
     JOB_APPLICATION_USER_PROMPT_TEMPLATE,
 )
+from app.modules.job_application.models import BulkJobApplicationStatus
 from app.modules.job_application.schemas import (
+    BulkJobApplicationLogListResponse,
+    BulkJobApplicationLogResponse,
+    BulkJobApplicationResponse,
     JobApplicationListResponse,
     JobApplicationResponse,
 )
 from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.llm.service import LLMFactory
 from app.modules.resume.crud import get_resume_by_id
+from app.modules.websocket.service import broadcast_bulk_job_application_log
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -295,6 +306,221 @@ async def update_job_application(
     if updated is None:
         return None
     return await _enrich_job_application_response(db, updated)
+
+
+async def _create_bulk_log_and_broadcast(
+    db: AsyncSession,
+    bulk_job_application_id: int,
+    user_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "in_progress",
+    details: str | None = None,
+    meta_data: dict | None = None,
+):
+    """
+    Create a bulk job application log entry and broadcast it via WebSocket.
+    Uses a separate session to commit immediately so logs are visible at runtime.
+    """
+    async with async_session() as log_db:
+        try:
+            log = await create_bulk_job_application_log(
+                log_db,
+                bulk_job_application_id=bulk_job_application_id,
+                action=action,
+                progress=progress,
+                status=status,
+                details=details,
+                meta_data=meta_data,
+            )
+            await log_db.commit()
+            await broadcast_bulk_job_application_log(
+                BulkJobApplicationLogResponse.model_validate(log).model_dump(),
+                user_id,
+            )
+            return log
+        except Exception:
+            await log_db.rollback()
+            raise
+
+
+async def start_bulk_job_application(
+    db: AsyncSession,
+    resume_id: int,
+    career_job_ids: list[int],
+    user_id: int,
+) -> BulkJobApplicationResponse:
+    """
+    Create a bulk job application record and return it.
+    Actual processing runs in background.
+    """
+    from datetime import datetime, timezone
+
+    resume = await get_resume_by_id(db, resume_id, user_id)
+    if resume is None:
+        raise NotFoundException(detail="Resume not found")
+
+    name = f"bulk_{int(datetime.now(timezone.utc).timestamp())}"
+    meta_data = {
+        "resume_id": resume_id,
+        "career_job_ids": career_job_ids,
+        "total": len(career_job_ids),
+    }
+    bulk_job_application = await create_bulk_job_application(
+        db,
+        {
+            "name": name,
+            "user_id": user_id,
+            "resume_id": resume_id,
+            "status": BulkJobApplicationStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    return BulkJobApplicationResponse.model_validate(bulk_job_application)
+
+
+async def run_bulk_job_application_background(
+    bulk_job_application_id: int,
+    resume_id: int,
+    career_job_ids: list[int],
+    user_id: int,
+) -> None:
+    """
+    Execute bulk job application creation in background.
+    Creates job applications one by one, logs each step, broadcasts via WebSocket.
+    """
+    async with async_session() as db:
+        try:
+            bulk_job_application = await get_bulk_job_application_by_id(
+                db, bulk_job_application_id
+            )
+            if bulk_job_application is None:
+                return
+            if bulk_job_application.status == BulkJobApplicationStatus.STOPPED.value:
+                return
+
+            await update_bulk_job_application_status(
+                db, bulk_job_application_id, BulkJobApplicationStatus.IN_PROGRESS
+            )
+            await db.commit()
+
+            await _create_bulk_log_and_broadcast(
+                db,
+                bulk_job_application_id,
+                user_id,
+                "bulk_started",
+                progress=0,
+                status="in_progress",
+                details=f"Starting bulk creation for {len(career_job_ids)} jobs",
+                meta_data={"total": len(career_job_ids)},
+            )
+
+            created_count = 0
+            failed_count = 0
+            total = len(career_job_ids)
+
+            for idx, career_job_id in enumerate(career_job_ids):
+                bulk_job_application = await get_bulk_job_application_by_id(
+                    db, bulk_job_application_id
+                )
+                if bulk_job_application and bulk_job_application.status == BulkJobApplicationStatus.STOPPED.value:
+                    break
+
+                progress = int((idx / total) * 100) if total > 0 else 0
+                await _create_bulk_log_and_broadcast(
+                    db,
+                    bulk_job_application_id,
+                    user_id,
+                    "job_application_started",
+                    progress=progress,
+                    status="in_progress",
+                    details=f"Creating job application {idx + 1}/{total}",
+                    meta_data={"career_job_id": career_job_id, "index": idx + 1, "total": total},
+                )
+
+                try:
+                    async with async_session() as app_db:
+                        await create_job_application_flow(
+                            app_db,
+                            career_job_id=career_job_id,
+                            resume_id=resume_id,
+                            user_id=user_id,
+                        )
+                        await app_db.commit()
+                    created_count += 1
+                    await _create_bulk_log_and_broadcast(
+                        db,
+                        bulk_job_application_id,
+                        user_id,
+                        "job_application_created",
+                        progress=int(((idx + 1) / total) * 100) if total > 0 else 100,
+                        status="completed",
+                        details=f"Created job application for job {career_job_id}",
+                        meta_data={"career_job_id": career_job_id, "job_application_index": idx + 1, "total": total},
+                    )
+                except Exception:
+                    failed_count += 1
+                    await _create_bulk_log_and_broadcast(
+                        db,
+                        bulk_job_application_id,
+                        user_id,
+                        "job_application_failed",
+                        progress=int(((idx + 1) / total) * 100) if total > 0 else 100,
+                        status="error",
+                        details=f"Failed to create job application for job {career_job_id}",
+                        meta_data={"career_job_id": career_job_id, "job_application_index": idx + 1, "total": total},
+                    )
+
+            final_status = BulkJobApplicationStatus.COMPLETED
+            if failed_count > 0 and created_count == 0:
+                final_status = BulkJobApplicationStatus.ERROR
+            elif failed_count > 0:
+                final_status = BulkJobApplicationStatus.COMPLETED
+
+            await update_bulk_job_application_status(
+                db, bulk_job_application_id, final_status
+            )
+            await db.commit()
+
+            await _create_bulk_log_and_broadcast(
+                db,
+                bulk_job_application_id,
+                user_id,
+                "bulk_completed",
+                progress=100,
+                status="completed",
+                details=f"Bulk creation finished. Created: {created_count}, Failed: {failed_count}",
+                meta_data={"created_count": created_count, "failed_count": failed_count, "total": total},
+            )
+        except Exception:
+            await db.rollback()
+            try:
+                async with async_session() as err_db:
+                    await update_bulk_job_application_status(
+                        err_db, bulk_job_application_id, BulkJobApplicationStatus.ERROR
+                    )
+                    await err_db.commit()
+            except Exception:
+                pass
+
+
+async def get_bulk_job_application_logs(
+    db: AsyncSession,
+    bulk_job_application_id: int,
+    user_id: int,
+) -> BulkJobApplicationLogListResponse:
+    """Return all logs for a bulk job application."""
+    bulk_job_application = await get_bulk_job_application_by_id(
+        db, bulk_job_application_id
+    )
+    if bulk_job_application is None:
+        raise NotFoundException(detail="Bulk job application not found")
+    if bulk_job_application.user_id != user_id:
+        raise NotFoundException(detail="Bulk job application not found")
+    logs = await get_bulk_job_application_logs_by_id(db, bulk_job_application_id)
+    return BulkJobApplicationLogListResponse(
+        items=[BulkJobApplicationLogResponse.model_validate(log) for log in logs]
+    )
 
 
 async def get_job_application_file_path(

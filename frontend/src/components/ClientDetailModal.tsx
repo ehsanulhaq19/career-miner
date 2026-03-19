@@ -6,6 +6,8 @@ import {
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
   HiOutlineBriefcase,
+  HiOutlineEnvelope,
+  HiOutlineGlobeAlt,
 } from "react-icons/hi2";
 import {
   careerClientService,
@@ -81,8 +83,15 @@ export default function ClientDetailModal({
       .finally(() => setLoading(false));
   }, [isOpen, clientId]);
 
+  const clientHasEmails = (client?.emails?.length ?? 0) > 0;
+
   useEffect(() => {
     if (!isOpen || !clientId) return;
+    if (!clientHasEmails) {
+      setJobs([]);
+      setJobsTotal(0);
+      return;
+    }
     setJobsLoading(true);
     const skip = (jobsPage - 1) * jobsLimit;
     careerJobService
@@ -90,13 +99,14 @@ export default function ClientDetailModal({
         career_client_id: clientId,
         skip,
         limit: jobsLimit,
+        has_client_emails: true,
       })
       .then((data) => {
         setJobs(data.items);
         setJobsTotal(data.total);
       })
       .finally(() => setJobsLoading(false));
-  }, [isOpen, clientId, jobsPage]);
+  }, [isOpen, clientId, jobsPage, clientHasEmails]);
 
   const handleChange = (
     field: keyof CareerClientUpdatePayload,
@@ -166,6 +176,45 @@ export default function ClientDetailModal({
                 </div>
               ) : client ? (
                 <>
+                  {(client.emails?.length ?? 0) > 0 || client.official_website ? (
+                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 space-y-3">
+                      {client.emails?.length ? (
+                        <div>
+                          <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-1">
+                            <HiOutlineEnvelope className="w-3.5 h-3.5" />
+                            Emails
+                          </span>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            {client.emails.map((email) => (
+                              <a
+                                key={email}
+                                href={`mailto:${email}`}
+                                className="text-sm text-primary-600 dark:text-primary-400 hover:underline"
+                              >
+                                {email}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {client.official_website ? (
+                        <div>
+                          <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-1">
+                            <HiOutlineGlobeAlt className="w-3.5 h-3.5" />
+                            Official Website
+                          </span>
+                          <a
+                            href={client.official_website.startsWith("http") ? client.official_website : `https://${client.official_website}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-primary-600 dark:text-primary-400 hover:underline break-all"
+                          >
+                            {client.official_website}
+                          </a>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div>
                     <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
                       Name
@@ -287,11 +336,16 @@ export default function ClientDetailModal({
             <div className="p-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <HiOutlineBriefcase className="w-4 h-4" />
-                Related Jobs ({jobsTotal})
+                Related Jobs
+                {clientHasEmails ? ` (${jobsTotal})` : " — add emails to view"}
               </h3>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
-              {jobsLoading ? (
+              {!clientHasEmails ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+                  Add emails to this client to see related jobs.
+                </p>
+              ) : jobsLoading ? (
                 <div className="space-y-3">
                   {[...Array(5)].map((_, i) => (
                     <div
@@ -328,6 +382,30 @@ export default function ClientDetailModal({
                           {job.job_site_name}
                         </div>
                       )}
+                      {job.description && (
+                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                          {job.description}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        {job.parsed_data?.location && (
+                          <span>{job.parsed_data.location}</span>
+                        )}
+                        {job.parsed_data?.salary && (
+                          <span>{job.parsed_data.salary}</span>
+                        )}
+                        {job.url && (
+                          <a
+                            href={job.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-primary-600 dark:text-primary-400 hover:underline truncate max-w-[200px]"
+                          >
+                            View job
+                          </a>
+                        )}
+                      </div>
                       <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                         {new Date(job.created_at).toLocaleDateString()}
                       </div>

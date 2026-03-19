@@ -9,6 +9,7 @@ import dashboardReducer from "./slices/dashboardSlice";
 import scrapJobReducer from "./slices/scrapJobSlice";
 import resumeReducer from "./slices/resumeSlice";
 import scrapClientReducer from "./slices/scrapClientSlice";
+import bulkJobApplicationReducer from "./slices/bulkJobApplicationSlice";
 
 export const store = configureStore({
   reducer: {
@@ -21,6 +22,7 @@ export const store = configureStore({
     resume: resumeReducer,
     scrapJob: scrapJobReducer,
     scrapClient: scrapClientReducer,
+    bulkJobApplication: bulkJobApplicationReducer,
   },
 });
 

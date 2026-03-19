@@ -6,11 +6,13 @@ import {
   updateScrapJobFromSocket,
   addScrapJobLogFromSocket,
 } from "@/store/slices/scrapJobSlice";
+import { addBulkJobApplicationLogFromSocket } from "@/store/slices/bulkJobApplicationSlice";
 import {
   updateScrapClientJobFromSocket,
   addScrapClientLogFromSocket,
 } from "@/store/slices/scrapClientSlice";
 import {
+  BULK_JOB_APPLICATION_LOG,
   SCRAP_JOB_PENDING,
   SCRAP_JOB_IN_PROGRESS,
   SCRAP_JOB_COMPLETED,
@@ -62,6 +64,13 @@ function getScrapClientWebSocketUrl(userId: number): string {
   return `${wsBase}/ws/scrap_client/${userId}?token=${encodeURIComponent(token || "")}`;
 }
 
+function getBulkJobApplicationWebSocketUrl(userId: number): string {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+  const wsBase = baseUrl.replace(/^http/, "ws").replace("/api", "");
+  const token = Cookies.get("token");
+  return `${wsBase}/ws/bulk_job_application/${userId}?token=${encodeURIComponent(token || "")}`;
+}
+
 export default function WebSocketProvider({
   children,
 }: {
@@ -71,10 +80,13 @@ export default function WebSocketProvider({
   const { user, token } = useAppSelector((state) => state.auth);
   const scrapJobWsRef = useRef<WebSocket | null>(null);
   const scrapClientWsRef = useRef<WebSocket | null>(null);
+  const bulkJobApplicationWsRef = useRef<WebSocket | null>(null);
   const scrapJobReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapClientReconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const bulkJobApplicationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapJobAttemptsRef = useRef(0);
   const scrapClientAttemptsRef = useRef(0);
+  const bulkJobApplicationAttemptsRef = useRef(0);
 
   useEffect(() => {
     if (!user?.id || !token) return;
@@ -187,8 +199,51 @@ export default function WebSocketProvider({
       };
     };
 
+    const connectBulkJobApplication = () => {
+      const ws = new WebSocket(getBulkJobApplicationWebSocketUrl(user.id));
+      bulkJobApplicationWsRef.current = ws;
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const { type, data } = message;
+          if (!type || !data) return;
+          if (type !== BULK_JOB_APPLICATION_LOG) return;
+          dispatch(
+            addBulkJobApplicationLogFromSocket({
+              id: data.id,
+              bulk_job_application_id: data.bulk_job_application_id,
+              action: data.action,
+              progress: data.progress,
+              status: data.status,
+              details: data.details,
+              meta_data: data.meta_data || {},
+              created_at: data.created_at,
+            })
+          );
+        } catch {
+          return;
+        }
+      };
+      ws.onclose = () => {
+        bulkJobApplicationWsRef.current = null;
+        const delay = Math.min(
+          1000 * 2 ** bulkJobApplicationAttemptsRef.current,
+          30000
+        );
+        bulkJobApplicationAttemptsRef.current += 1;
+        bulkJobApplicationReconnectRef.current = setTimeout(
+          connectBulkJobApplication,
+          delay
+        );
+      };
+      ws.onopen = () => {
+        bulkJobApplicationAttemptsRef.current = 0;
+      };
+    };
+
     connectScrapJob();
     connectScrapClient();
+    connectBulkJobApplication();
 
     return () => {
       if (scrapJobReconnectRef.current) {
@@ -196,6 +251,13 @@ export default function WebSocketProvider({
       }
       if (scrapClientReconnectRef.current) {
         clearTimeout(scrapClientReconnectRef.current);
+      }
+      if (bulkJobApplicationReconnectRef.current) {
+        clearTimeout(bulkJobApplicationReconnectRef.current);
+      }
+      if (bulkJobApplicationWsRef.current) {
+        bulkJobApplicationWsRef.current.close();
+        bulkJobApplicationWsRef.current = null;
       }
       if (scrapJobWsRef.current) {
         scrapJobWsRef.current.close();

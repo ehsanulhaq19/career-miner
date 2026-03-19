@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,6 +6,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.job_application.schemas import (
+    BulkJobApplicationCreateRequest,
     JobApplicationCreateRequest,
     JobApplicationListResponse,
     JobApplicationResponse,
@@ -13,9 +14,12 @@ from app.modules.job_application.schemas import (
 )
 from app.modules.job_application.service import (
     create_job_application_flow,
+    get_bulk_job_application_logs,
     get_job_application,
     get_job_application_file_path,
     list_job_applications,
+    run_bulk_job_application_background,
+    start_bulk_job_application,
     update_job_application,
 )
 
@@ -86,6 +90,50 @@ async def update_job_application_endpoint(
     if updated is None:
         raise HTTPException(status_code=404, detail="Job application not found")
     return updated
+
+
+@router.post("/bulk", response_model=dict, status_code=201)
+async def create_bulk_job_applications_endpoint(
+    request: BulkJobApplicationCreateRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Create job applications in bulk.
+    Accepts resume_id and career_job_ids.
+    Runs in background and sends socket updates for each job application created.
+    """
+    if not request.career_job_ids:
+        raise HTTPException(
+            status_code=400, detail="At least one career job must be selected"
+        )
+    result = await start_bulk_job_application(
+        db,
+        resume_id=request.resume_id,
+        career_job_ids=request.career_job_ids,
+        user_id=current_user.id,
+    )
+    background_tasks.add_task(
+        run_bulk_job_application_background,
+        result.id,
+        request.resume_id,
+        request.career_job_ids,
+        current_user.id,
+    )
+    return {"id": result.id, "status": result.status}
+
+
+@router.get("/bulk/{bulk_job_application_id}/logs")
+async def get_bulk_job_application_logs_endpoint(
+    bulk_job_application_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve logs for a bulk job application run."""
+    return await get_bulk_job_application_logs(
+        db, bulk_job_application_id, current_user.id
+    )
 
 
 @router.get("/{job_application_id}/file")

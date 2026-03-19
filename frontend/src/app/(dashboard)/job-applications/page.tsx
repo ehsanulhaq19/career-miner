@@ -6,11 +6,13 @@ import {
   HiOutlineChevronRight,
   HiOutlinePaperAirplane,
   HiOutlinePlus,
+  HiOutlineDocumentDuplicate,
 } from "react-icons/hi2";
 import { jobApplicationService } from "@/services/jobApplicationService";
 import { JobApplication } from "@/types";
 import JobApplicationDetailModal from "@/components/JobApplicationDetailModal";
 import CreateJobApplicationModal from "@/components/CreateJobApplicationModal";
+import BulkJobApplicationModal from "@/components/BulkJobApplicationModal";
 
 export default function JobApplicationsPage() {
   const [items, setItems] = useState<JobApplication[]>([]);
@@ -24,6 +26,7 @@ export default function JobApplicationsPage() {
   const [selectedApplication, setSelectedApplication] =
     useState<JobApplication | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
 
   const refetch = () => {
     const skip = (page - 1) * limit;
@@ -70,6 +73,13 @@ export default function JobApplicationsPage() {
             </span>
           </label>
           <button
+            onClick={() => setBulkModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlineDocumentDuplicate className="w-4 h-4" />
+            Bulk Create
+          </button>
+          <button
             onClick={() => setCreateModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
           >
@@ -100,13 +110,22 @@ export default function JobApplicationsPage() {
           <p className="text-gray-500 dark:text-gray-400">
             No job applications found.
           </p>
-          <button
-            onClick={() => setCreateModalOpen(true)}
-            className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            <HiOutlinePlus className="w-4 h-4" />
-            Create Job Application
-          </button>
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <button
+              onClick={() => setBulkModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              <HiOutlineDocumentDuplicate className="w-4 h-4" />
+              Bulk Create
+            </button>
+            <button
+              onClick={() => setCreateModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <HiOutlinePlus className="w-4 h-4" />
+              Create Job Application
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -224,6 +243,14 @@ export default function JobApplicationsPage() {
         onClose={() => setCreateModalOpen(false)}
         onCreated={() => {
           setCreateModalOpen(false);
+          setPage(1);
+          refetch();
+        }}
+      />
+      <BulkJobApplicationModal
+        isOpen={bulkModalOpen}
+        onClose={() => setBulkModalOpen(false)}
+        onCreated={() => {
           setPage(1);
           refetch();
         }}

@@ -102,6 +102,12 @@ async def get_career_job(
     site = await get_job_site_by_id(db, career_job.job_site_id)
     job_data = CareerJobDetailResponse.model_validate(career_job)
     job_data.job_site_name = site.name if site else None
+    if career_job.career_client_id:
+        client = await get_career_client_by_id(db, career_job.career_client_id)
+        if client:
+            job_data.career_client_name = client.name
+            job_data.career_client_emails = list(client.emails or [])
+            job_data.career_client_official_website = client.official_website
     if user_id is not None:
         seen_ids = await get_seen_career_job_ids_from_list(
             db, user_id, [career_job_id]
@@ -123,6 +129,104 @@ async def mark_job_seen(
     existing = await get_career_job_user(db, career_job_id, user_id)
     if existing is None:
         await create_career_job_user(db, career_job_id, user_id)
+
+
+async def get_career_job_dates_grouped(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 50,
+):
+    """Return date groups with job counts for tabular UI."""
+    from app.modules.career_job.crud import get_career_job_dates_grouped as crud_dates
+    from app.modules.career_job.schemas import (
+        CareerJobDateGroupListResponse,
+        CareerJobDateGroupResponse,
+    )
+
+    rows, total = await crud_dates(db, skip=skip, limit=limit)
+    items = [
+        CareerJobDateGroupResponse(
+            date=d.isoformat() if d else "",
+            job_count=count,
+        )
+        for d, count in rows
+    ]
+    page = (skip // limit) + 1 if limit > 0 else 1
+    return CareerJobDateGroupListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_career_jobs_by_date(
+    db: AsyncSession,
+    target_date: str,
+    skip: int = 0,
+    limit: int = 50,
+    user_id: int | None = None,
+):
+    """Return career jobs for a date with application counts."""
+    from datetime import datetime
+
+    from app.modules.career_job.crud import get_career_jobs_by_date as crud_by_date
+    from app.modules.career_job.schemas import (
+        CareerJobWithApplicationCountsResponse,
+        CareerJobWithCountsListResponse,
+    )
+
+    try:
+        parsed = datetime.strptime(target_date, "%Y-%m-%d").date()
+    except ValueError:
+        from app.core.exceptions import BadRequestException
+
+        raise BadRequestException(detail="Invalid date format. Use YYYY-MM-DD")
+
+    rows, total = await crud_by_date(
+        db, target_date=parsed, skip=skip, limit=limit, user_id=user_id
+    )
+    site_cache = {}
+    client_cache = {}
+    items = []
+    for job, active_count, inactive_count in rows:
+        job_site_name = site_cache.get(job.job_site_id)
+        if job_site_name is None:
+            site = await get_job_site_by_id(db, job.job_site_id)
+            job_site_name = site.name if site else None
+            site_cache[job.job_site_id] = job_site_name
+        career_client_name = None
+        career_client_emails: list[str] = []
+        career_client_official_website: str | None = None
+        if job.career_client_id:
+            cached = client_cache.get(job.career_client_id)
+            if cached is not None:
+                career_client_name, career_client_emails, career_client_official_website = cached
+            else:
+                client = await get_career_client_by_id(db, job.career_client_id)
+                career_client_name = client.name if client else None
+                career_client_emails = list(client.emails or []) if client else []
+                career_client_official_website = client.official_website if client else None
+                client_cache[job.career_client_id] = (
+                    career_client_name,
+                    career_client_emails,
+                    career_client_official_website,
+                )
+        item = CareerJobWithApplicationCountsResponse.model_validate(job)
+        item.job_site_name = job_site_name
+        item.career_client_name = career_client_name
+        item.career_client_emails = career_client_emails
+        item.career_client_official_website = career_client_official_website
+        item.active_application_count = active_count
+        item.inactive_application_count = inactive_count
+        items.append(item)
+    page = (skip // limit) + 1 if limit > 0 else 1
+    return CareerJobWithCountsListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
 
 
 async def get_dashboard_stats(db: AsyncSession) -> DashboardStatsResponse:

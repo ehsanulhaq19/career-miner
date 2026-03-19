@@ -10,6 +10,7 @@ router = APIRouter()
 
 SCRAP_JOB_CHANNEL_PREFIX = "/ws/scrap_job/"
 SCRAP_CLIENT_CHANNEL_PREFIX = "/ws/scrap_client/"
+BULK_JOB_APPLICATION_CHANNEL_PREFIX = "/ws/bulk_job_application/"
 
 
 @router.websocket("/ws/scrap_job/{user_id}")
@@ -64,6 +65,36 @@ async def scrap_client_websocket(
         return
 
     channel = f"{SCRAP_CLIENT_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.connect(websocket, channel)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        connection_manager.disconnect(websocket, channel)
+
+
+@router.websocket("/ws/bulk_job_application/{user_id}")
+async def bulk_job_application_websocket(
+    websocket: WebSocket,
+    user_id: int,
+    token: str = Query(...),
+) -> None:
+    """
+    WebSocket endpoint for bulk job application updates.
+    Clients connect to receive real-time bulk job application log updates.
+    Requires valid JWT token in query parameter.
+    """
+    try:
+        payload = verify_token(token)
+        token_user_id = payload.get("sub")
+        if token_user_id is None or int(token_user_id) != user_id:
+            await websocket.close(code=4001)
+            return
+    except (JWTError, ValueError):
+        await websocket.close(code=4001)
+        return
+
+    channel = f"{BULK_JOB_APPLICATION_CHANNEL_PREFIX}{user_id}"
     await connection_manager.connect(websocket, channel)
     try:
         while True:

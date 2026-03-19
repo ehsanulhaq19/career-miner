@@ -1,8 +1,11 @@
-from sqlalchemy import func, select
+from datetime import date
+
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.models import CareerClient
 from app.modules.career_job.models import CareerJob, CareerJobUser
+from app.modules.job_application.models import JobApplication
 from app.modules.job_site.models import JobSite
 from app.modules.scrap_job.models import ScrapJob
 
@@ -195,6 +198,100 @@ async def get_career_jobs_count_by_site(db: AsyncSession, job_site_id: int) -> i
         select(func.count(CareerJob.id)).where(CareerJob.job_site_id == job_site_id)
     )
     return result.scalar() or 0
+
+
+async def get_career_job_dates_grouped(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 50,
+) -> tuple[list[tuple[date, int]], int]:
+    """
+    Return distinct dates of career jobs with job count per date.
+    Only includes jobs whose client has at least one email.
+    Ordered by date descending. Used for tabular UI grouped by creation date.
+    """
+    date_col = cast(CareerJob.created_at, Date)
+    client_has_emails = func.coalesce(
+        func.json_array_length(CareerClient.emails), 0
+    ) > 0
+    subq = (
+        select(date_col, func.count(CareerJob.id).label("job_count"))
+        .select_from(CareerJob)
+        .join(CareerClient, CareerJob.career_client_id == CareerClient.id)
+        .where(client_has_emails)
+        .group_by(date_col)
+        .order_by(date_col.desc())
+    )
+    count_subq = (
+        select(date_col)
+        .select_from(CareerJob)
+        .join(CareerClient, CareerJob.career_client_id == CareerClient.id)
+        .where(client_has_emails)
+        .distinct()
+        .subquery()
+    )
+    count_result = await db.execute(select(func.count()).select_from(count_subq))
+    total = count_result.scalar() or 0
+    result = await db.execute(subq.offset(skip).limit(limit))
+    rows = result.all()
+    return [(r[0], r[1]) for r in rows], total
+
+
+async def get_career_jobs_by_date(
+    db: AsyncSession,
+    target_date: date,
+    skip: int = 0,
+    limit: int = 50,
+    user_id: int | None = None,
+) -> tuple[list[tuple[CareerJob, int, int]], int]:
+    """
+    Return career jobs created on the given date with job application counts.
+    Only includes jobs whose client has at least one email.
+    Returns list of (CareerJob, active_count, inactive_count) and total.
+    """
+    date_col = cast(CareerJob.created_at, Date)
+    client_has_emails = func.coalesce(
+        func.json_array_length(CareerClient.emails), 0
+    ) > 0
+    base_query = (
+        select(CareerJob)
+        .join(CareerClient, CareerJob.career_client_id == CareerClient.id)
+        .where(date_col == target_date)
+        .where(client_has_emails)
+    )
+    count_query = (
+        select(func.count(CareerJob.id))
+        .select_from(CareerJob)
+        .join(CareerClient, CareerJob.career_client_id == CareerClient.id)
+        .where(date_col == target_date)
+        .where(client_has_emails)
+    )
+    base_query = base_query.order_by(CareerJob.created_at.desc())
+    result = await db.execute(base_query.offset(skip).limit(limit))
+    jobs = list(result.scalars().all())
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    job_app_counts: list[tuple[CareerJob, int, int]] = []
+    for job in jobs:
+        active_query = select(func.count(JobApplication.id)).where(
+            JobApplication.career_job_id == job.id,
+            JobApplication.is_active.is_(True),
+        )
+        inactive_query = select(func.count(JobApplication.id)).where(
+            JobApplication.career_job_id == job.id,
+            JobApplication.is_active.is_(False),
+        )
+        if user_id is not None:
+            active_query = active_query.where(JobApplication.user_id == user_id)
+            inactive_query = inactive_query.where(JobApplication.user_id == user_id)
+        active_result = await db.execute(active_query)
+        inactive_result = await db.execute(inactive_query)
+        active_count = active_result.scalar() or 0
+        inactive_count = inactive_result.scalar() or 0
+        job_app_counts.append((job, active_count, inactive_count))
+
+    return job_app_counts, total
 
 
 async def get_dashboard_stats(db: AsyncSession) -> dict:
