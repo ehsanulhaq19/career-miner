@@ -9,17 +9,22 @@ interface ResumePreviewModalProps {
   resumeId: number | null;
   isOpen: boolean;
   onClose: () => void;
+  onUpdated?: () => void;
 }
 
 export default function ResumePreviewModal({
   resumeId,
   isOpen,
   onClose,
+  onUpdated,
 }: ResumePreviewModalProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [fallbackContent, setFallbackContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resumeName, setResumeName] = useState<string>("Resume Preview");
+  const [resume, setResume] = useState<Resume | null>(null);
+  const [extraDetail, setExtraDetail] = useState<string>("");
+  const [savingExtraDetail, setSavingExtraDetail] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -44,14 +49,18 @@ export default function ResumePreviewModal({
       }
       setPdfUrl(null);
       setFallbackContent(null);
+      setResume(null);
+      setExtraDetail("");
       return;
     }
     setLoading(true);
     setFallbackContent(null);
     resumeService
       .getResumeById(resumeId)
-      .then((resume: Resume) => {
-        setResumeName(resume.name);
+      .then((res: Resume) => {
+        setResume(res);
+        setResumeName(res.name);
+        setExtraDetail(res.extra_detail ?? "");
         return resumeService
           .getResumeFileBlobUrl(resumeId)
           .then((blobUrl) => {
@@ -62,7 +71,7 @@ export default function ResumePreviewModal({
             setPdfUrl(blobUrl);
           })
           .catch(() => {
-            setFallbackContent(resume.content);
+            setFallbackContent(res?.content ?? null);
           });
       })
       .catch(() => {
@@ -77,6 +86,22 @@ export default function ResumePreviewModal({
       }
     };
   }, [isOpen, resumeId]);
+
+  const handleSaveExtraDetail = async () => {
+    if (!resumeId) return;
+    setSavingExtraDetail(true);
+    try {
+      await resumeService.updateResume(resumeId, {
+        extra_detail: extraDetail.trim() || null,
+      });
+      setResume((prev) =>
+        prev ? { ...prev, extra_detail: extraDetail.trim() || null } : null
+      );
+      onUpdated?.();
+    } finally {
+      setSavingExtraDetail(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -102,6 +127,24 @@ export default function ResumePreviewModal({
           </button>
         </div>
         <div className="flex-1 min-h-0 flex flex-col p-6 overflow-hidden">
+          {!loading && resume && (
+            <div className="mb-4 shrink-0">
+              <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                Extra Detail
+              </label>
+              <textarea
+                value={extraDetail}
+                onChange={(e) => setExtraDetail(e.target.value)}
+                onBlur={handleSaveExtraDetail}
+                placeholder="Additional context (projects, skills, achievements)..."
+                rows={3}
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"
+              />
+              {savingExtraDetail && (
+                <span className="text-xs text-gray-500 mt-1">Saving...</span>
+              )}
+            </div>
+          )}
           {loading ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="animate-pulse space-y-4 w-full max-w-md">

@@ -12,6 +12,7 @@ import {
   HiOutlineEnvelope,
   HiOutlineDocumentText,
   HiOutlineArrowRightOnRectangle,
+  HiOutlinePaperAirplane,
 } from "react-icons/hi2";
 import { useAppDispatch } from "@/store/store";
 import { logoutUser } from "@/store/slices/authSlice";
@@ -23,6 +24,7 @@ const navItems = [
   { label: "Jobs", href: "/jobs", icon: HiOutlineBriefcase },
   { label: "Clients", href: "/clients", icon: HiOutlineUserGroup },
   { label: "Resumes", href: "/resumes", icon: HiOutlineDocumentText },
+  { label: "Job Applications", href: "/job-applications", icon: HiOutlinePaperAirplane },
   { label: "Profile", href: "/profile", icon: HiOutlineUser },
 ];
 

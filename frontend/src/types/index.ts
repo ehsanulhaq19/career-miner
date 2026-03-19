@@ -47,7 +47,31 @@ export interface CareerJob {
   created_at: string;
   updated_at: string;
   job_site_name?: string;
+  career_client_name?: string;
   job_seen?: boolean;
+}
+
+export interface JobApplication {
+  id: number;
+  application_name: string;
+  resume_id: number;
+  user_id: number;
+  applied_on: string;
+  is_active: boolean;
+  subject: string | null;
+  cover_letter: string | null;
+  output_resume_path: string | null;
+  career_job_id: number;
+  similarity_score?: number | null;
+  meta_data: Record<string, unknown>;
+  is_email_send: boolean;
+  to_emails: string[];
+  created_at: string;
+  career_job_title?: string | null;
+  career_client_id?: number | null;
+  career_client_name?: string | null;
+  job_site_name?: string | null;
+  resume_name?: string | null;
 }
 
 export interface ScrapJob {
@@ -171,6 +195,7 @@ export interface Resume {
   size: number;
   extension: string;
   content: string | null;
+  extra_detail: string | null;
   uploaded_by_id: number;
   is_active: boolean;
   created_at: string;

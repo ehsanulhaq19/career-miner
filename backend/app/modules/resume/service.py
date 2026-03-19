@@ -52,6 +52,7 @@ async def upload_resume(
     db: AsyncSession,
     file: UploadFile,
     user_id: int,
+    extra_detail: str | None = None,
 ) -> ResumeResponse:
     """
     Upload a PDF file, save it to local folder, extract content and persist resume record.
@@ -85,6 +86,7 @@ async def upload_resume(
         "extension": extension,
         "file_path": unique_name,
         "content": extracted_content,
+        "extra_detail": extra_detail,
         "uploaded_by_id": user_id,
         "is_active": True,
     }
@@ -98,6 +100,7 @@ async def list_resumes(
     skip: int = 0,
     limit: int = 20,
     name_filter: str | None = None,
+    is_active: bool | None = None,
 ) -> ResumeListResponse:
     """
     Return a paginated list of resumes for the user in descending order.
@@ -108,6 +111,7 @@ async def list_resumes(
         skip=skip,
         limit=limit,
         name_filter=name_filter,
+        is_active=is_active,
     )
     response_items = [ResumeResponse.model_validate(item) for item in items]
     page = (skip // limit) + 1 if limit > 0 else 1

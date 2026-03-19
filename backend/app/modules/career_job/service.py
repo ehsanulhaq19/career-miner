@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
+from app.modules.career_client.crud import get_career_client_by_id
 from app.modules.career_job.crud import (
     create_career_job_user,
     get_career_job_by_id,
@@ -31,6 +32,7 @@ async def list_career_jobs(
     search: str | None = None,
     user_id: int | None = None,
     show_unseen_jobs: bool = False,
+    has_client_emails: bool = False,
 ) -> CareerJobListResponse:
     """
     Return a paginated list of career jobs with job site names.
@@ -46,6 +48,7 @@ async def list_career_jobs(
         search=search,
         user_id=user_id,
         show_unseen_jobs=show_unseen_jobs,
+        has_client_emails=has_client_emails,
     )
 
     seen_job_ids: set[int] = set()
@@ -57,6 +60,7 @@ async def list_career_jobs(
 
     response_items = []
     site_cache: dict[int, str] = {}
+    client_cache: dict[int, str] = {}
     for item in items:
         job_site_name = site_cache.get(item.job_site_id)
         if job_site_name is None:
@@ -64,8 +68,17 @@ async def list_career_jobs(
             job_site_name = site.name if site else None
             site_cache[item.job_site_id] = job_site_name
 
+        career_client_name = None
+        if item.career_client_id:
+            career_client_name = client_cache.get(item.career_client_id)
+            if career_client_name is None:
+                client = await get_career_client_by_id(db, item.career_client_id)
+                career_client_name = client.name if client else None
+                client_cache[item.career_client_id] = career_client_name
+
         job_data = CareerJobResponse.model_validate(item)
         job_data.job_site_name = job_site_name
+        job_data.career_client_name = career_client_name
         job_data.job_seen = item.id in seen_job_ids
         response_items.append(job_data)
 

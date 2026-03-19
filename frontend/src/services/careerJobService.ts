@@ -10,6 +10,7 @@ export const careerJobService = {
     category?: string;
     search?: string;
     show_unseen_jobs?: boolean;
+    has_client_emails?: boolean;
   }) {
     const { data } = await api.get<PaginatedResponse<CareerJob>>(
       "/career-jobs",

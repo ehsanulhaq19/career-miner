@@ -240,6 +240,11 @@ export default function ResumesPage() {
                 <p className="text-xs text-gray-400 dark:text-gray-500">
                   {new Date(resume.created_at).toLocaleDateString()}
                 </p>
+                {resume.extra_detail && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-1">
+                    {resume.extra_detail}
+                  </p>
+                )}
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex gap-2">
                   <button
                     onClick={(e) => {
@@ -287,6 +292,7 @@ export default function ResumesPage() {
         resumeId={selectedResume?.id ?? null}
         isOpen={!!selectedResume}
         onClose={() => setSelectedResume(null)}
+        onUpdated={refetch}
       />
     </div>
   );

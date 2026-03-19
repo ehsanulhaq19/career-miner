@@ -30,6 +30,7 @@ class CareerJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     job_site_name: str | None = None
+    career_client_name: str | None = None
     job_seen: bool = False
 
 

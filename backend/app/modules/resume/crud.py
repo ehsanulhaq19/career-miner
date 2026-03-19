@@ -10,6 +10,7 @@ async def get_resumes_by_user(
     skip: int = 0,
     limit: int = 20,
     name_filter: str | None = None,
+    is_active: bool | None = None,
 ) -> tuple[list[Resume], int]:
     """
     Retrieve a paginated list of resumes for a user in descending order by id.
@@ -22,6 +23,8 @@ async def get_resumes_by_user(
     if name_filter and name_filter.strip():
         pattern = f"%{name_filter.strip()}%"
         base_query = base_query.where(Resume.name.ilike(pattern))
+    if is_active is not None:
+        base_query = base_query.where(Resume.is_active.is_(is_active))
 
     query = base_query.offset(skip).limit(limit)
     count_query = (
@@ -30,6 +33,8 @@ async def get_resumes_by_user(
     if name_filter and name_filter.strip():
         pattern = f"%{name_filter.strip()}%"
         count_query = count_query.where(Resume.name.ilike(pattern))
+    if is_active is not None:
+        count_query = count_query.where(Resume.is_active.is_(is_active))
 
     result = await db.execute(query)
     items = list(result.scalars().all())

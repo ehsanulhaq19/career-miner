@@ -16,6 +16,7 @@ class Resume(Base):
     extension = Column(String(20), nullable=False)
     file_path = Column(String(1000), nullable=True)
     content = Column(Text, nullable=True)
+    extra_detail = Column(Text, nullable=True)
     uploaded_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())

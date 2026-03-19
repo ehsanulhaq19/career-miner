@@ -14,6 +14,7 @@ from app.modules.career_client.models import CareerClient  # noqa: F401
 from app.modules.career_job.models import CareerJob, CareerJobUser  # noqa: F401
 from app.modules.scrap_job.models import ScrapJob  # noqa: F401
 from app.modules.resume.models import Resume  # noqa: F401
+from app.modules.job_application.models import JobApplication  # noqa: F401
 from app.modules.scrap_client.models import ScrapClientJob, ScrapClientLog  # noqa: F401
 
 settings = get_settings()

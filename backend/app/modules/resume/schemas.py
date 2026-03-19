@@ -15,6 +15,7 @@ class ResumeResponse(BaseModel):
     size: int
     extension: str
     content: str | None
+    extra_detail: str | None
     uploaded_by_id: int
     is_active: bool
     created_at: datetime
@@ -37,3 +38,4 @@ class ResumeUpdate(BaseModel):
     """
 
     is_active: bool | None = None
+    extra_detail: str | None = None

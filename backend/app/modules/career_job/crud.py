@@ -77,6 +77,7 @@ async def get_career_jobs(
     search: str | None = None,
     user_id: int | None = None,
     show_unseen_jobs: bool = False,
+    has_client_emails: bool = False,
 ) -> tuple[list[CareerJob], int]:
     """
     Retrieve a paginated list of career jobs with optional filters.
@@ -105,6 +106,14 @@ async def get_career_jobs(
         )
         query = query.where(CareerJob.id.not_in(subq))
         count_query = count_query.where(CareerJob.id.not_in(subq))
+
+    if has_client_emails:
+        query = query.join(CareerClient, CareerJob.career_client_id == CareerClient.id).where(
+            func.coalesce(func.json_array_length(CareerClient.emails), 0) > 0
+        )
+        count_query = count_query.join(
+            CareerClient, CareerJob.career_client_id == CareerClient.id
+        ).where(func.coalesce(func.json_array_length(CareerClient.emails), 0) > 0)
 
     query = query.order_by(CareerJob.created_at.desc()).offset(skip).limit(limit)
 

@@ -31,6 +31,7 @@ async def list_career_jobs_endpoint(
     category: str | None = Query(None),
     search: str | None = Query(None),
     show_unseen_jobs: bool = Query(False),
+    has_client_emails: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CareerJobListResponse:
@@ -48,6 +49,7 @@ async def list_career_jobs_endpoint(
         search=search,
         user_id=current_user.id,
         show_unseen_jobs=show_unseen_jobs,
+        has_client_emails=has_client_emails,
     )
 
 
