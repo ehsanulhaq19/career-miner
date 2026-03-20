@@ -24,6 +24,7 @@ export default function ResumePreviewModal({
   const [resumeName, setResumeName] = useState<string>("Resume Preview");
   const [resume, setResume] = useState<Resume | null>(null);
   const [extraDetail, setExtraDetail] = useState<string>("");
+  const [savingName, setSavingName] = useState(false);
   const [savingExtraDetail, setSavingExtraDetail] = useState(false);
   const blobUrlRef = useRef<string | null>(null);
 
@@ -87,6 +88,25 @@ export default function ResumePreviewModal({
     };
   }, [isOpen, resumeId]);
 
+  const handleSaveName = async () => {
+    if (!resumeId) return;
+    const trimmed = resumeName.trim();
+    if (!trimmed) {
+      setResumeName(resume?.name ?? "");
+      return;
+    }
+    if (trimmed === resume?.name) return;
+    setSavingName(true);
+    try {
+      await resumeService.updateResume(resumeId, { name: trimmed });
+      setResume((prev: Resume | null) => (prev ? { ...prev, name: trimmed } : null));
+      setResumeName(trimmed);
+      onUpdated?.();
+    } finally {
+      setSavingName(false);
+    }
+  };
+
   const handleSaveExtraDetail = async () => {
     if (!resumeId) return;
     setSavingExtraDetail(true);
@@ -94,7 +114,7 @@ export default function ResumePreviewModal({
       await resumeService.updateResume(resumeId, {
         extra_detail: extraDetail.trim() || null,
       });
-      setResume((prev) =>
+      setResume((prev: Resume | null) =>
         prev ? { ...prev, extra_detail: extraDetail.trim() || null } : null
       );
       onUpdated?.();
@@ -128,10 +148,27 @@ export default function ResumePreviewModal({
         </div>
         <div className="flex-1 min-h-0 flex flex-col p-6 overflow-hidden">
           {!loading && resume && (
-            <div className="mb-4 shrink-0">
-              <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
-                Extra Detail
-              </label>
+            <>
+              <div className="mb-4 shrink-0">
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={resumeName}
+                  onChange={(e) => setResumeName(e.target.value)}
+                  onBlur={handleSaveName}
+                  placeholder="Resume name"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                {savingName && (
+                  <span className="text-xs text-gray-500 mt-1">Saving...</span>
+                )}
+              </div>
+              <div className="mb-4 shrink-0">
+                <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                  Extra Detail
+                </label>
               <textarea
                 value={extraDetail}
                 onChange={(e) => setExtraDetail(e.target.value)}
@@ -143,7 +180,8 @@ export default function ResumePreviewModal({
               {savingExtraDetail && (
                 <span className="text-xs text-gray-500 mt-1">Saving...</span>
               )}
-            </div>
+              </div>
+            </>
           )}
           {loading ? (
             <div className="flex-1 flex items-center justify-center">

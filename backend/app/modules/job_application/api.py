@@ -7,19 +7,27 @@ from app.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.job_application.schemas import (
     BulkJobApplicationCreateRequest,
+    BulkJobApplicationEmailSendRequest,
     JobApplicationCreateRequest,
     JobApplicationListResponse,
     JobApplicationResponse,
     JobApplicationUpdate,
 )
+from app.modules.job_application.schemas import EmailLogResponse
 from app.modules.job_application.service import (
     create_job_application_flow,
     get_bulk_job_application_logs,
+    get_bulk_job_application_email_send_logs,
     get_job_application,
+    get_job_application_email_logs,
     get_job_application_file_path,
     list_job_applications,
+    list_job_applications_for_bulk_email,
     run_bulk_job_application_background,
+    run_bulk_job_application_email_background,
+    send_job_application_email,
     start_bulk_job_application,
+    start_bulk_job_application_email_send,
     update_job_application,
 )
 
@@ -133,6 +141,107 @@ async def get_bulk_job_application_logs_endpoint(
     """Retrieve logs for a bulk job application run."""
     return await get_bulk_job_application_logs(
         db, bulk_job_application_id, current_user.id
+    )
+
+
+@router.get("/bulk-email/fetch", response_model=JobApplicationListResponse)
+async def list_job_applications_for_bulk_email_endpoint(
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    min_similarity_score: float = Query(0, ge=0, le=100),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobApplicationListResponse:
+    """
+    List job applications created on the given date with similarity_score
+    >= min_similarity_score. Used for bulk email send UI.
+    """
+    items, total = await list_job_applications_for_bulk_email(
+        db,
+        user_id=current_user.id,
+        target_date=date,
+        min_similarity_score=min_similarity_score,
+        skip=skip,
+        limit=limit,
+    )
+    page = (skip // limit) + 1 if limit > 0 else 1
+    return JobApplicationListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.post("/bulk-email/send", status_code=201)
+async def bulk_send_job_application_emails_endpoint(
+    request: BulkJobApplicationEmailSendRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Send emails for multiple job applications in bulk.
+    Runs in background and sends socket updates for each step.
+    """
+    if not request.job_application_ids:
+        raise HTTPException(
+            status_code=400, detail="At least one job application must be selected"
+        )
+    result = await start_bulk_job_application_email_send(
+        db,
+        job_application_ids=request.job_application_ids,
+        user_id=current_user.id,
+    )
+    background_tasks.add_task(
+        run_bulk_job_application_email_background,
+        result["id"],
+        request.job_application_ids,
+        current_user.id,
+    )
+    return {"id": result["id"], "status": result["status"]}
+
+
+@router.get("/bulk-email/{bulk_id}/logs")
+async def get_bulk_job_application_email_send_logs_endpoint(
+    bulk_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieve logs for a bulk job application email send run.
+    """
+    return await get_bulk_job_application_email_send_logs(
+        db, bulk_id, current_user.id
+    )
+
+
+@router.post("/{job_application_id}/send-email", response_model=JobApplicationResponse)
+async def send_job_application_email_endpoint(
+    job_application_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobApplicationResponse:
+    """
+    Send emails for the job application to each configured to_email address.
+    """
+    return await send_job_application_email(
+        db, job_application_id, current_user.id
+    )
+
+
+@router.get("/{job_application_id}/email-logs")
+async def get_job_application_email_logs_endpoint(
+    job_application_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[EmailLogResponse]:
+    """
+    Retrieve all email logs for the given job application.
+    """
+    return await get_job_application_email_logs(
+        db, job_application_id, current_user.id
     )
 
 

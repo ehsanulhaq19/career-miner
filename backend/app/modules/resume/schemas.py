@@ -37,5 +37,6 @@ class ResumeUpdate(BaseModel):
     Schema for updating an existing resume.
     """
 
+    name: str | None = None
     is_active: bool | None = None
     extra_detail: str | None = None

@@ -99,3 +99,68 @@ class JobApplication(Base):
     is_email_send = Column(Boolean, default=False, nullable=False)
     to_emails = Column(JSON, default=list)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class JobApplicationEmailLog(Base):
+    """
+    SQLAlchemy pivot model linking job applications to their related email logs.
+    """
+
+    __tablename__ = "job_application_email_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_application_id = Column(
+        Integer, ForeignKey("job_applications.id"), nullable=False
+    )
+    email_log_id = Column(Integer, ForeignKey("email_logs.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class BulkJobApplicationEmailSendStatus(str, enum.Enum):
+    """Enumeration of bulk job application email send execution states."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    ERROR = "error"
+    TERMINATED = "terminated"
+
+
+class BulkJobApplicationEmailSend(Base):
+    """
+    SQLAlchemy model representing a bulk job application email send run.
+    """
+
+    __tablename__ = "bulk_job_application_email_sends"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(
+        String(50),
+        default=BulkJobApplicationEmailSendStatus.PENDING.value,
+        nullable=False,
+    )
+    meta_data = Column(JSON, default=dict, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class BulkJobApplicationEmailSendLog(Base):
+    """
+    SQLAlchemy model representing a bulk job application email send progress log.
+    """
+
+    __tablename__ = "bulk_job_application_email_send_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bulk_job_application_email_send_id = Column(
+        Integer,
+        ForeignKey("bulk_job_application_email_sends.id"),
+        nullable=False,
+    )
+    action = Column(String(255), nullable=False)
+    progress = Column(Integer, default=0, nullable=False)
+    status = Column(String(50), default="pending", nullable=False)
+    details = Column(Text, nullable=True)
+    meta_data = Column(JSON, default=dict, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())

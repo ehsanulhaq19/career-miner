@@ -161,6 +161,8 @@ async def update_resume(
     Update an existing resume and return the updated resume or None.
     """
     data = update_data.model_dump(exclude_unset=True)
+    if "name" in data and (not data["name"] or not str(data["name"]).strip()):
+        del data["name"]
     if not data:
         resume = await crud_get_resume_by_id(db, resume_id, user_id)
         return ResumeResponse.model_validate(resume) if resume else None

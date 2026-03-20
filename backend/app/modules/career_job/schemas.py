@@ -105,6 +105,18 @@ class CareerJobWithCountsListResponse(BaseModel):
     limit: int
 
 
+class ActiveJobsByFitResponse(BaseModel):
+    """Schema for active job applications count by similarity score range."""
+
+    score_100: int = 0
+    above_90: int = 0
+    above_80: int = 0
+    above_70: int = 0
+    above_60: int = 0
+    above_50: int = 0
+    below_50: int = 0
+
+
 class DashboardStatsResponse(BaseModel):
     """Schema for dashboard statistics overview."""
 
@@ -113,3 +125,6 @@ class DashboardStatsResponse(BaseModel):
     total_job_sites: int
     total_clients: int
     job_site_cards: list[JobSiteCardResponse]
+    active_jobs_by_fit: ActiveJobsByFitResponse = Field(
+        default_factory=lambda: ActiveJobsByFitResponse()
+    )

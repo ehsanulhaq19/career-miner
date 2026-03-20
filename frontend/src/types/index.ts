@@ -74,6 +74,30 @@ export interface JobApplication {
   career_client_name?: string | null;
   job_site_name?: string | null;
   resume_name?: string | null;
+  email_send_count?: number;
+}
+
+export interface EmailLog {
+  id: number;
+  subject: string;
+  content: string | null;
+  file_attachment: string | null;
+  to_email: string;
+  from_email: string | null;
+  response: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface BulkJobApplicationEmailSendLog {
+  id: number;
+  bulk_job_application_email_send_id: number;
+  action: string;
+  progress: number;
+  status: string;
+  details: string | null;
+  meta_data: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface ScrapJob {
@@ -178,12 +202,23 @@ export interface CareerClient {
   created_at: string;
 }
 
+export interface ActiveJobsByFit {
+  score_100: number;
+  above_90: number;
+  above_80: number;
+  above_70: number;
+  above_60: number;
+  above_50: number;
+  below_50: number;
+}
+
 export interface DashboardStats {
   total_jobs_executed: number;
   total_job_records: number;
   total_job_sites: number;
   total_clients: number;
   job_site_cards: JobSiteCard[];
+  active_jobs_by_fit?: ActiveJobsByFit;
 }
 
 export interface JobSiteCard {

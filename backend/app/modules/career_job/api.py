@@ -126,5 +126,8 @@ async def get_dashboard_stats_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> DashboardStatsResponse:
-    """Return dashboard statistics including per-site summary cards."""
-    return await get_dashboard_stats(db)
+    """
+    Return dashboard statistics including per-site summary cards
+    and active job applications count by fit score.
+    """
+    return await get_dashboard_stats(db, user_id=current_user.id)

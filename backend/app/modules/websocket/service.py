@@ -1,6 +1,7 @@
 """WebSocket broadcast service for sending messages to channels."""
 
 from app.modules.websocket.constants.socket_message_types import (
+    BULK_JOB_APPLICATION_EMAIL_SEND_LOG,
     BULK_JOB_APPLICATION_LOG,
     SCRAP_CLIENT_COMPLETED,
     SCRAP_CLIENT_ERROR,
@@ -22,6 +23,9 @@ from app.modules.websocket.manager import connection_manager
 SCRAP_JOB_CHANNEL_PREFIX = "/ws/scrap_job/"
 SCRAP_CLIENT_CHANNEL_PREFIX = "/ws/scrap_client/"
 BULK_JOB_APPLICATION_CHANNEL_PREFIX = "/ws/bulk_job_application/"
+BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX = (
+    "/ws/bulk_job_application_email/"
+)
 
 
 def _scrap_job_log_data(log: dict) -> dict:
@@ -166,6 +170,38 @@ async def broadcast_bulk_job_application_log(log: dict, user_id: int) -> None:
     data = _bulk_job_application_log_data(log)
     channel = f"{BULK_JOB_APPLICATION_CHANNEL_PREFIX}{user_id}"
     await connection_manager.send_to_channel(channel, BULK_JOB_APPLICATION_LOG, data)
+
+
+def _bulk_job_application_email_send_log_data(log: dict) -> dict:
+    """Build data payload for bulk job application email send log socket messages."""
+    created_at = log.get("created_at")
+    if hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    return {
+        "id": log.get("id"),
+        "bulk_job_application_email_send_id": log.get(
+            "bulk_job_application_email_send_id"
+        ),
+        "action": log.get("action"),
+        "progress": log.get("progress"),
+        "status": log.get("status"),
+        "details": log.get("details"),
+        "meta_data": log.get("meta_data", {}),
+        "created_at": created_at,
+    }
+
+
+async def broadcast_bulk_job_application_email_send_log(
+    log: dict, user_id: int
+) -> None:
+    """
+    Broadcast bulk job application email send log update to the user's channel.
+    """
+    data = _bulk_job_application_email_send_log_data(log)
+    channel = f"{BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.send_to_channel(
+        channel, BULK_JOB_APPLICATION_EMAIL_SEND_LOG, data
+    )
 
 
 async def broadcast_scrap_client_status(

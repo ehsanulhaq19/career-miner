@@ -1,6 +1,8 @@
 import api from "./api";
 import {
   BulkJobApplicationLog,
+  BulkJobApplicationEmailSendLog,
+  EmailLog,
   JobApplication,
   PaginatedResponse,
 } from "@/types";
@@ -84,6 +86,55 @@ export const jobApplicationService = {
       `/job-applications/${id}`,
       payload
     );
+    return data;
+  },
+
+  async sendJobApplicationEmail(id: number) {
+    const { data } = await api.post<JobApplication>(
+      `/job-applications/${id}/send-email`
+    );
+    return data;
+  },
+
+  async getJobApplicationEmailLogs(id: number) {
+    const { data } = await api.get<EmailLog[]>(
+      `/job-applications/${id}/email-logs`
+    );
+    return data;
+  },
+
+  async fetchJobApplicationsForBulkEmail(
+    date: string,
+    minSimilarityScore: number,
+    skip: number,
+    limit: number
+  ) {
+    const { data } = await api.get<PaginatedResponse<JobApplication>>(
+      "/job-applications/bulk-email/fetch",
+      {
+        params: {
+          date,
+          min_similarity_score: minSimilarityScore,
+          skip,
+          limit,
+        },
+      }
+    );
+    return data;
+  },
+
+  async bulkSendJobApplicationEmails(jobApplicationIds: number[]) {
+    const { data } = await api.post<{ id: number; status: string }>(
+      "/job-applications/bulk-email/send",
+      { job_application_ids: jobApplicationIds }
+    );
+    return data;
+  },
+
+  async getBulkJobApplicationEmailSendLogs(bulkId: number) {
+    const { data } = await api.get<{
+      items: BulkJobApplicationEmailSendLog[];
+    }>(`/job-applications/bulk-email/${bulkId}/logs`);
     return data;
   },
 };

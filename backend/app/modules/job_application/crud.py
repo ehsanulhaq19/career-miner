@@ -1,11 +1,17 @@
-from sqlalchemy import func, select
+from datetime import date
+
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.job_application.models import (
     BulkJobApplication,
     BulkJobApplicationLog,
+    BulkJobApplicationEmailSend,
+    BulkJobApplicationEmailSendLog,
+    BulkJobApplicationEmailSendStatus,
     BulkJobApplicationStatus,
     JobApplication,
+    JobApplicationEmailLog,
 )
 
 
@@ -62,6 +68,109 @@ async def get_job_application_by_id(
         .where(JobApplication.user_id == user_id)
     )
     return result.scalars().first()
+
+
+async def get_active_job_applications_count_by_similarity(
+    db: AsyncSession, user_id: int
+) -> dict:
+    """
+    Return count of active job applications grouped by similarity score ranges.
+    Ranges: 100%, 90-99%, 80-89%, 70-79%, 60-69%, 50-59%, below 50%.
+    """
+    score_100 = select(func.count(JobApplication.id)).where(
+        JobApplication.user_id == user_id,
+        JobApplication.is_active.is_(True),
+        JobApplication.similarity_score == 100,
+    )
+    above_90 = select(func.count(JobApplication.id)).where(
+        JobApplication.user_id == user_id,
+        JobApplication.is_active.is_(True),
+        JobApplication.similarity_score >= 90,
+        JobApplication.similarity_score < 100,
+    )
+    above_80 = select(func.count(JobApplication.id)).where(
+        JobApplication.user_id == user_id,
+        JobApplication.is_active.is_(True),
+        JobApplication.similarity_score >= 80,
+        JobApplication.similarity_score < 90,
+    )
+    above_70 = select(func.count(JobApplication.id)).where(
+        JobApplication.user_id == user_id,
+        JobApplication.is_active.is_(True),
+        JobApplication.similarity_score >= 70,
+        JobApplication.similarity_score < 80,
+    )
+    above_60 = select(func.count(JobApplication.id)).where(
+        JobApplication.user_id == user_id,
+        JobApplication.is_active.is_(True),
+        JobApplication.similarity_score >= 60,
+        JobApplication.similarity_score < 70,
+    )
+    above_50 = select(func.count(JobApplication.id)).where(
+        JobApplication.user_id == user_id,
+        JobApplication.is_active.is_(True),
+        JobApplication.similarity_score >= 50,
+        JobApplication.similarity_score < 60,
+    )
+    below_50 = select(func.count(JobApplication.id)).where(
+        JobApplication.user_id == user_id,
+        JobApplication.is_active.is_(True),
+        (JobApplication.similarity_score < 50)
+        | (JobApplication.similarity_score.is_(None)),
+    )
+
+    r100 = await db.execute(score_100)
+    r90 = await db.execute(above_90)
+    r80 = await db.execute(above_80)
+    r70 = await db.execute(above_70)
+    r60 = await db.execute(above_60)
+    r50 = await db.execute(above_50)
+    rb50 = await db.execute(below_50)
+
+    return {
+        "score_100": r100.scalar() or 0,
+        "above_90": r90.scalar() or 0,
+        "above_80": r80.scalar() or 0,
+        "above_70": r70.scalar() or 0,
+        "above_60": r60.scalar() or 0,
+        "above_50": r50.scalar() or 0,
+        "below_50": rb50.scalar() or 0,
+    }
+
+
+async def get_job_applications_by_date_and_similarity(
+    db: AsyncSession,
+    user_id: int,
+    target_date: date,
+    min_similarity_score: float,
+    skip: int = 0,
+    limit: int = 100,
+) -> tuple[list[JobApplication], int]:
+    """
+    Retrieve job applications created on the given date with similarity_score
+    greater than or equal to min_similarity_score.
+    """
+    date_col = cast(JobApplication.created_at, Date)
+    base_query = (
+        select(JobApplication)
+        .where(JobApplication.user_id == user_id)
+        .where(date_col == target_date)
+        .where(JobApplication.similarity_score >= min_similarity_score)
+        .order_by(JobApplication.created_at.desc())
+    )
+    result = await db.execute(base_query.offset(skip).limit(limit))
+    items = list(result.scalars().all())
+
+    count_query = (
+        select(func.count(JobApplication.id))
+        .where(JobApplication.user_id == user_id)
+        .where(date_col == target_date)
+        .where(JobApplication.similarity_score >= min_similarity_score)
+    )
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    return items, total
 
 
 async def get_bulk_job_application_by_id(
@@ -160,3 +269,154 @@ async def update_job_application(
     await db.flush()
     await db.refresh(job_application)
     return job_application
+
+
+async def create_job_application_email_log(
+    db: AsyncSession,
+    job_application_id: int,
+    email_log_id: int,
+) -> JobApplicationEmailLog:
+    """
+    Create a pivot record linking a job application to an email log.
+    """
+    record = JobApplicationEmailLog(
+        job_application_id=job_application_id,
+        email_log_id=email_log_id,
+    )
+    db.add(record)
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+async def get_email_send_count_for_job_application(
+    db: AsyncSession,
+    job_application_id: int,
+) -> int:
+    """
+    Return the number of email logs linked to the given job application.
+    """
+    result = await db.execute(
+        select(func.count(JobApplicationEmailLog.id)).where(
+            JobApplicationEmailLog.job_application_id == job_application_id
+        )
+    )
+    return result.scalar() or 0
+
+
+async def get_email_logs_for_job_application(
+    db: AsyncSession,
+    job_application_id: int,
+) -> list:
+    """
+    Return all email logs linked to the given job application.
+    """
+    from app.modules.email.models import EmailLog
+
+    result = await db.execute(
+        select(EmailLog)
+        .join(
+            JobApplicationEmailLog,
+            JobApplicationEmailLog.email_log_id == EmailLog.id,
+        )
+        .where(
+            JobApplicationEmailLog.job_application_id == job_application_id
+        )
+        .order_by(EmailLog.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def create_bulk_job_application_email_send(
+    db: AsyncSession,
+    data: dict,
+) -> BulkJobApplicationEmailSend:
+    """
+    Create a new bulk job application email send record.
+    """
+    record = BulkJobApplicationEmailSend(**data)
+    db.add(record)
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+async def get_bulk_job_application_email_send_by_id(
+    db: AsyncSession,
+    bulk_id: int,
+) -> BulkJobApplicationEmailSend | None:
+    """
+    Retrieve a bulk job application email send by id.
+    """
+    result = await db.execute(
+        select(BulkJobApplicationEmailSend).where(
+            BulkJobApplicationEmailSend.id == bulk_id
+        )
+    )
+    return result.scalars().first()
+
+
+async def create_bulk_job_application_email_send_log(
+    db: AsyncSession,
+    bulk_job_application_email_send_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "pending",
+    details: str | None = None,
+    meta_data: dict | None = None,
+) -> BulkJobApplicationEmailSendLog:
+    """
+    Create a new bulk job application email send log entry.
+    """
+    log = BulkJobApplicationEmailSendLog(
+        bulk_job_application_email_send_id=bulk_job_application_email_send_id,
+        action=action,
+        progress=progress,
+        status=status,
+        details=details,
+        meta_data=meta_data or {},
+    )
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+    return log
+
+
+async def get_bulk_job_application_email_send_logs(
+    db: AsyncSession,
+    bulk_job_application_email_send_id: int,
+) -> list[BulkJobApplicationEmailSendLog]:
+    """
+    Retrieve all logs for a bulk job application email send.
+    """
+    result = await db.execute(
+        select(BulkJobApplicationEmailSendLog)
+        .where(
+            BulkJobApplicationEmailSendLog.bulk_job_application_email_send_id
+            == bulk_job_application_email_send_id
+        )
+        .order_by(BulkJobApplicationEmailSendLog.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def update_bulk_job_application_email_send_status(
+    db: AsyncSession,
+    bulk_id: int,
+    status: str | BulkJobApplicationEmailSendStatus,
+) -> BulkJobApplicationEmailSend | None:
+    """
+    Update the status of a bulk job application email send.
+    """
+    record = await get_bulk_job_application_email_send_by_id(db, bulk_id)
+    if record is None:
+        return None
+    status_value = (
+        status.value
+        if isinstance(status, BulkJobApplicationEmailSendStatus)
+        else status
+    )
+    record.status = status_value
+    await db.flush()
+    await db.refresh(record)
+    return record

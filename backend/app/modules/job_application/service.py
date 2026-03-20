@@ -2,7 +2,8 @@ import json
 import os
 import re
 from pathlib import Path
-
+import random
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -13,30 +14,49 @@ from app.database import async_session
 from app.modules.job_application.crud import (
     create_bulk_job_application,
     create_bulk_job_application_log,
+    create_bulk_job_application_email_send,
+    create_bulk_job_application_email_send_log,
     create_job_application,
+    create_job_application_email_log,
     get_bulk_job_application_by_id,
     get_bulk_job_application_logs_by_id,
+    get_bulk_job_application_email_send_by_id,
+    get_bulk_job_application_email_send_logs as crud_get_bulk_email_send_logs,
+    get_email_logs_for_job_application,
+    get_email_send_count_for_job_application,
     get_job_application_by_id,
     get_job_applications,
+    get_job_applications_by_date_and_similarity,
     update_bulk_job_application_status,
+    update_bulk_job_application_email_send_status,
     update_job_application as crud_update_job_application,
 )
 from app.modules.job_application.prompts import (
     JOB_APPLICATION_SYSTEM_PROMPT,
     JOB_APPLICATION_USER_PROMPT_TEMPLATE,
 )
-from app.modules.job_application.models import BulkJobApplicationStatus
+from app.modules.job_application.models import (
+    BulkJobApplicationEmailSendStatus,
+    BulkJobApplicationStatus,
+)
 from app.modules.job_application.schemas import (
+    BulkJobApplicationEmailSendLogListResponse,
+    BulkJobApplicationEmailSendLogResponse,
     BulkJobApplicationLogListResponse,
     BulkJobApplicationLogResponse,
     BulkJobApplicationResponse,
+    EmailLogResponse,
     JobApplicationListResponse,
     JobApplicationResponse,
 )
 from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.llm.service import LLMFactory
 from app.modules.resume.crud import get_resume_by_id
-from app.modules.websocket.service import broadcast_bulk_job_application_log
+from app.modules.email.service import EmailService
+from app.modules.websocket.service import (
+    broadcast_bulk_job_application_email_send_log,
+    broadcast_bulk_job_application_log,
+)
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -231,7 +251,9 @@ async def create_job_application_flow(
 async def _enrich_job_application_response(
     db: AsyncSession, job_application
 ) -> JobApplicationResponse:
-    """Enrich job application with related entity names."""
+    """
+    Enrich job application with related entity names and email send count.
+    """
     career_job = await get_career_job_by_id(db, job_application.career_job_id)
     job_site = None
     career_client = None
@@ -245,6 +267,9 @@ async def _enrich_job_application_response(
     from app.modules.resume.crud import get_resume_by_id
 
     resume = await get_resume_by_id(db, job_application.resume_id, job_application.user_id)
+    email_send_count = await get_email_send_count_for_job_application(
+        db, job_application.id
+    )
 
     response = JobApplicationResponse.model_validate(job_application)
     response.career_job_title = career_job.title if career_job else None
@@ -254,6 +279,7 @@ async def _enrich_job_application_response(
     response.career_client_name = career_client.name if career_client else None
     response.job_site_name = job_site.name if job_site else None
     response.resume_name = resume.name if resume else None
+    response.email_send_count = email_send_count
     return response
 
 
@@ -536,3 +562,326 @@ async def get_job_application_file_path(
     if not full_path.exists():
         return None
     return full_path
+
+
+async def send_job_application_email(
+    db: AsyncSession, job_application_id: int, user_id: int
+) -> JobApplicationResponse:
+    """
+    Send emails for a job application to each to_email address.
+    Uses subject, cover_letter, output_resume_path from the job application.
+    Creates JobApplicationEmailLog for each successful send and marks
+    is_email_send true when all emails are sent successfully.
+    """
+    job_application = await get_job_application_by_id(
+        db, job_application_id, user_id
+    )
+    if job_application is None:
+        raise NotFoundException(detail="Job application not found")
+
+    to_emails = job_application.to_emails or []
+    if not to_emails:
+        raise BadRequestException(detail="No recipient emails configured")
+
+    subject = job_application.subject or ""
+    cover_letter = job_application.cover_letter or ""
+    attachment_path = job_application.output_resume_path
+    resume = await get_resume_by_id(db, job_application.resume_id, user_id)
+
+    email_service = EmailService()
+    all_success = True
+    for to_email in to_emails:
+        to_email = str(to_email).strip()
+        if not to_email:
+            continue
+        try:
+            result = await email_service.send_email(
+                recipient=to_email,
+                subject=subject,
+                content=cover_letter,
+                attachment_path=attachment_path,
+                attachment_filename=resume.name,
+            )
+            if result.get("email_log_id"):
+                await create_job_application_email_log(
+                    db, job_application_id, result["email_log_id"]
+                )
+        except Exception:
+            all_success = False
+            raise
+
+    if all_success:
+        await crud_update_job_application(
+            db, job_application_id, user_id, {"is_email_send": True, "is_active": False}
+        )
+
+    job_application = await get_job_application_by_id(
+        db, job_application_id, user_id
+    )
+    return await _enrich_job_application_response(db, job_application)
+
+
+async def get_job_application_email_logs(
+    db: AsyncSession, job_application_id: int, user_id: int
+) -> list[EmailLogResponse]:
+    """
+    Return all email logs for the given job application.
+    """
+    job_application = await get_job_application_by_id(
+        db, job_application_id, user_id
+    )
+    if job_application is None:
+        raise NotFoundException(detail="Job application not found")
+
+    logs = await get_email_logs_for_job_application(db, job_application_id)
+    return [EmailLogResponse.model_validate(log) for log in logs]
+
+
+async def list_job_applications_for_bulk_email(
+    db: AsyncSession,
+    user_id: int,
+    target_date: str,
+    min_similarity_score: float,
+    skip: int = 0,
+    limit: int = 100,
+) -> tuple[list[JobApplicationResponse], int]:
+    """
+    Return job applications created on the given date with similarity_score
+    >= min_similarity_score, enriched with email_send_count.
+    """
+    from datetime import datetime
+
+    try:
+        dt = datetime.strptime(target_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise BadRequestException(detail="Invalid date format, use YYYY-MM-DD")
+
+    items, total = await get_job_applications_by_date_and_similarity(
+        db,
+        user_id=user_id,
+        target_date=dt,
+        min_similarity_score=min_similarity_score,
+        skip=skip,
+        limit=limit,
+    )
+    response_items = []
+    for item in items:
+        enriched = await _enrich_job_application_response(db, item)
+        response_items.append(enriched)
+    return response_items, total
+
+
+async def _create_bulk_email_log_and_broadcast(
+    db: AsyncSession,
+    bulk_id: int,
+    user_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "in_progress",
+    details: str | None = None,
+    meta_data: dict | None = None,
+):
+    """
+    Create a bulk job application email send log and broadcast via WebSocket.
+    """
+    async with async_session() as log_db:
+        try:
+            log = await create_bulk_job_application_email_send_log(
+                log_db,
+                bulk_job_application_email_send_id=bulk_id,
+                action=action,
+                progress=progress,
+                status=status,
+                details=details,
+                meta_data=meta_data,
+            )
+            await log_db.commit()
+            await broadcast_bulk_job_application_email_send_log(
+                BulkJobApplicationEmailSendLogResponse.model_validate(log).model_dump(),
+                user_id,
+            )
+            return log
+        except Exception:
+            await log_db.rollback()
+            raise
+
+
+async def start_bulk_job_application_email_send(
+    db: AsyncSession,
+    job_application_ids: list[int],
+    user_id: int,
+) -> dict:
+    """
+    Create a bulk job application email send record and return it.
+    Actual processing runs in background.
+    """
+    from datetime import datetime, timezone
+
+    meta_data = {
+        "job_application_ids": job_application_ids,
+        "total": len(job_application_ids),
+    }
+    bulk = await create_bulk_job_application_email_send(
+        db,
+        {
+            "user_id": user_id,
+            "status": BulkJobApplicationEmailSendStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    return {"id": bulk.id, "status": bulk.status}
+
+
+async def run_bulk_job_application_email_background(
+    bulk_id: int,
+    job_application_ids: list[int],
+    user_id: int,
+) -> None:
+    """
+    Execute bulk job application email send in background.
+    Sends emails for each job application, logs each step, broadcasts via WebSocket.
+    """
+    async with async_session() as db:
+        try:
+            bulk = await get_bulk_job_application_email_send_by_id(db, bulk_id)
+            if bulk is None:
+                return
+
+            await update_bulk_job_application_email_send_status(
+                db, bulk_id, BulkJobApplicationEmailSendStatus.IN_PROGRESS
+            )
+            await db.commit()
+
+            await _create_bulk_email_log_and_broadcast(
+                db,
+                bulk_id,
+                user_id,
+                "bulk_email_started",
+                progress=0,
+                status="in_progress",
+                details=f"Starting bulk email send for {len(job_application_ids)} applications",
+                meta_data={"total": len(job_application_ids)},
+            )
+
+            total = len(job_application_ids)
+            success_count = 0
+            failed_count = 0
+
+            for idx, job_application_id in enumerate(job_application_ids):
+                progress = int((idx / total) * 100) if total > 0 else 0
+                await _create_bulk_email_log_and_broadcast(
+                    db,
+                    bulk_id,
+                    user_id,
+                    "job_application_email_started",
+                    progress=progress,
+                    status="in_progress",
+                    details=f"Sending emails for application {idx + 1}/{total}",
+                    meta_data={
+                        "job_application_id": job_application_id,
+                        "index": idx + 1,
+                        "total": total,
+                    },
+                )
+
+                try:
+                    await asyncio.sleep(random.randint(1, 3))
+                    async with async_session() as app_db:
+                        await send_job_application_email(
+                            app_db, job_application_id, user_id
+                        )
+                        await app_db.commit()
+                    success_count += 1
+                    await _create_bulk_email_log_and_broadcast(
+                        db,
+                        bulk_id,
+                        user_id,
+                        "job_application_email_sent",
+                        progress=int(((idx + 1) / total) * 100) if total > 0 else 100,
+                        status="completed",
+                        details=f"Emails sent for application {job_application_id}",
+                        meta_data={
+                            "job_application_id": job_application_id,
+                            "index": idx + 1,
+                            "total": total,
+                        },
+                    )
+                except Exception:
+                    failed_count += 1
+                    await _create_bulk_email_log_and_broadcast(
+                        db,
+                        bulk_id,
+                        user_id,
+                        "job_application_email_failed",
+                        progress=int(((idx + 1) / total) * 100) if total > 0 else 100,
+                        status="error",
+                        details=f"Failed to send emails for application {job_application_id}",
+                        meta_data={
+                            "job_application_id": job_application_id,
+                            "index": idx + 1,
+                            "total": total,
+                        },
+                    )
+
+            final_status = BulkJobApplicationEmailSendStatus.COMPLETED
+            if failed_count > 0 and success_count == 0:
+                final_status = BulkJobApplicationEmailSendStatus.ERROR
+            elif failed_count > 0:
+                final_status = BulkJobApplicationEmailSendStatus.COMPLETED
+
+            await update_bulk_job_application_email_send_status(
+                db, bulk_id, final_status
+            )
+            await db.commit()
+
+            await _create_bulk_email_log_and_broadcast(
+                db,
+                bulk_id,
+                user_id,
+                "bulk_email_completed",
+                progress=100,
+                status="completed",
+                details=f"Bulk email finished. Success: {success_count}, Failed: {failed_count}",
+                meta_data={
+                    "success_count": success_count,
+                    "failed_count": failed_count,
+                    "total": total,
+                },
+            )
+        except Exception:
+            await db.rollback()
+            try:
+                async with async_session() as err_db:
+                    await update_bulk_job_application_email_send_status(
+                        err_db, bulk_id, BulkJobApplicationEmailSendStatus.ERROR
+                    )
+                    await err_db.commit()
+            except Exception:
+                pass
+
+
+async def get_bulk_job_application_email_send_logs(
+    db: AsyncSession,
+    bulk_job_application_email_send_id: int,
+    user_id: int,
+) -> BulkJobApplicationEmailSendLogListResponse:
+    """
+    Return all logs for a bulk job application email send.
+    """
+    bulk = await get_bulk_job_application_email_send_by_id(
+        db, bulk_job_application_email_send_id
+    )
+    if bulk is None:
+        raise NotFoundException(detail="Bulk email send not found")
+    if bulk.user_id != user_id:
+        raise NotFoundException(detail="Bulk email send not found")
+
+    logs = await crud_get_bulk_email_send_logs(
+        db, bulk_job_application_email_send_id
+    )
+    return BulkJobApplicationEmailSendLogListResponse(
+        items=[
+            BulkJobApplicationEmailSendLogResponse.model_validate(log)
+            for log in logs
+        ]
+    )

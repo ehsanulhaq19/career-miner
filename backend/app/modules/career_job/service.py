@@ -229,8 +229,18 @@ async def get_career_jobs_by_date(
     )
 
 
-async def get_dashboard_stats(db: AsyncSession) -> DashboardStatsResponse:
-    """Build and return the dashboard statistics including per-site cards."""
+async def get_dashboard_stats(
+    db: AsyncSession, user_id: int
+) -> DashboardStatsResponse:
+    """
+    Build and return the dashboard statistics including per-site cards
+    and active job applications count by fit score.
+    """
+    from app.modules.career_job.schemas import ActiveJobsByFitResponse
+    from app.modules.job_application.crud import (
+        get_active_job_applications_count_by_similarity,
+    )
+
     stats = await crud_dashboard_stats(db)
 
     sites, _ = await get_job_sites(db, skip=0, limit=1000)
@@ -249,10 +259,15 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStatsResponse:
             )
         )
 
+    active_by_fit = await get_active_job_applications_count_by_similarity(
+        db, user_id
+    )
+
     return DashboardStatsResponse(
         total_jobs_executed=stats["total_jobs_executed"],
         total_job_records=stats["total_job_records"],
         total_job_sites=stats["total_job_sites"],
         total_clients=stats["total_clients"],
         job_site_cards=job_site_cards,
+        active_jobs_by_fit=ActiveJobsByFitResponse(**active_by_fit),
     )

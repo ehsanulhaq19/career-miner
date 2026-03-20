@@ -17,6 +17,12 @@ class BulkJobApplicationCreateRequest(BaseModel):
     career_job_ids: list[int]
 
 
+class BulkJobApplicationEmailSendRequest(BaseModel):
+    """Schema for bulk job application email send request."""
+
+    job_application_ids: list[int]
+
+
 class JobApplicationUpdate(BaseModel):
     """Schema for updating a job application."""
 
@@ -48,6 +54,44 @@ class JobApplicationResponse(BaseModel):
     career_client_name: str | None = None
     job_site_name: str | None = None
     resume_name: str | None = None
+    email_send_count: int = 0
+
+
+class EmailLogResponse(BaseModel):
+    """Schema for email log response data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    subject: str
+    content: str | None
+    file_attachment: str | None
+    to_email: str
+    from_email: str | None
+    response: str | None
+    status: str
+    created_at: datetime
+
+
+class BulkJobApplicationEmailSendLogResponse(BaseModel):
+    """Schema for bulk job application email send log response data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bulk_job_application_email_send_id: int
+    action: str
+    progress: int
+    status: str
+    details: str | None
+    meta_data: dict
+    created_at: datetime
+
+
+class BulkJobApplicationEmailSendLogListResponse(BaseModel):
+    """Schema for list of bulk job application email send logs."""
+
+    items: list[BulkJobApplicationEmailSendLogResponse]
 
 
 class JobApplicationListResponse(BaseModel):

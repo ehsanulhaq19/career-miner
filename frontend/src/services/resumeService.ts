@@ -2,6 +2,7 @@ import api from "./api";
 import { PaginatedResponse, Resume } from "@/types";
 
 export interface ResumeUpdatePayload {
+  name?: string | null;
   is_active?: boolean;
   extra_detail?: string | null;
 }

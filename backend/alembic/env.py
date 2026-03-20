@@ -14,10 +14,14 @@ from app.modules.career_client.models import CareerClient  # noqa: F401
 from app.modules.career_job.models import CareerJob, CareerJobUser  # noqa: F401
 from app.modules.scrap_job.models import ScrapJob  # noqa: F401
 from app.modules.resume.models import Resume  # noqa: F401
+from app.modules.email.models import EmailLog  # noqa: F401
 from app.modules.job_application.models import (  # noqa: F401
     BulkJobApplication,
+    BulkJobApplicationEmailSend,
+    BulkJobApplicationEmailSendLog,
     BulkJobApplicationLog,
     JobApplication,
+    JobApplicationEmailLog,
 )
 from app.modules.scrap_client.models import ScrapClientJob, ScrapClientLog  # noqa: F401
 

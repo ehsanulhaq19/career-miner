@@ -6,6 +6,7 @@ import {
   HiOutlineDocumentText,
   HiOutlineGlobeAlt,
   HiOutlineUserGroup,
+  HiOutlineChartBar,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import { fetchDashboardStats } from "@/store/slices/dashboardSlice";
@@ -118,6 +119,90 @@ export default function DashboardPage() {
             </div>
           </div>
         ))}
+        {stats?.active_jobs_by_fit && (
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 lg:col-span-4">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="p-3 rounded-lg text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30">
+                <HiOutlineChartBar className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  Active Job Applications by Fit Score
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Total:{" "}
+                  {(
+                    (stats.active_jobs_by_fit.score_100 ?? 0) +
+                    (stats.active_jobs_by_fit.above_90 ?? 0) +
+                    (stats.active_jobs_by_fit.above_80 ?? 0) +
+                    (stats.active_jobs_by_fit.above_70 ?? 0) +
+                    (stats.active_jobs_by_fit.above_60 ?? 0) +
+                    (stats.active_jobs_by_fit.above_50 ?? 0) +
+                    (stats.active_jobs_by_fit.below_50 ?? 0)
+                  ).toLocaleString()}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  100%
+                </p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                  {(stats.active_jobs_by_fit.score_100 ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Above 90%
+                </p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                  {(stats.active_jobs_by_fit.above_90 ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Above 80%
+                </p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                  {(stats.active_jobs_by_fit.above_80 ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Above 70%
+                </p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                  {(stats.active_jobs_by_fit.above_70 ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Above 60%
+                </p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                  {(stats.active_jobs_by_fit.above_60 ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Above 50%
+                </p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                  {(stats.active_jobs_by_fit.above_50 ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  Below 50%
+                </p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">
+                  {(stats.active_jobs_by_fit.below_50 ?? 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div>

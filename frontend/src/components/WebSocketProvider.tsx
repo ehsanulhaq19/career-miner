@@ -7,12 +7,14 @@ import {
   addScrapJobLogFromSocket,
 } from "@/store/slices/scrapJobSlice";
 import { addBulkJobApplicationLogFromSocket } from "@/store/slices/bulkJobApplicationSlice";
+import { addBulkEmailSendLogFromSocket } from "@/store/slices/bulkEmailSendSlice";
 import {
   updateScrapClientJobFromSocket,
   addScrapClientLogFromSocket,
 } from "@/store/slices/scrapClientSlice";
 import {
   BULK_JOB_APPLICATION_LOG,
+  BULK_JOB_APPLICATION_EMAIL_SEND_LOG,
   SCRAP_JOB_PENDING,
   SCRAP_JOB_IN_PROGRESS,
   SCRAP_JOB_COMPLETED,
@@ -71,6 +73,13 @@ function getBulkJobApplicationWebSocketUrl(userId: number): string {
   return `${wsBase}/ws/bulk_job_application/${userId}?token=${encodeURIComponent(token || "")}`;
 }
 
+function getBulkEmailSendWebSocketUrl(userId: number): string {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+  const wsBase = baseUrl.replace(/^http/, "ws").replace("/api", "");
+  const token = Cookies.get("token");
+  return `${wsBase}/ws/bulk_job_application_email/${userId}?token=${encodeURIComponent(token || "")}`;
+}
+
 export default function WebSocketProvider({
   children,
 }: {
@@ -81,12 +90,15 @@ export default function WebSocketProvider({
   const scrapJobWsRef = useRef<WebSocket | null>(null);
   const scrapClientWsRef = useRef<WebSocket | null>(null);
   const bulkJobApplicationWsRef = useRef<WebSocket | null>(null);
+  const bulkEmailSendWsRef = useRef<WebSocket | null>(null);
   const scrapJobReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapClientReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const bulkJobApplicationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const bulkEmailSendReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapJobAttemptsRef = useRef(0);
   const scrapClientAttemptsRef = useRef(0);
   const bulkJobApplicationAttemptsRef = useRef(0);
+  const bulkEmailSendAttemptsRef = useRef(0);
 
   useEffect(() => {
     if (!user?.id || !token) return;
@@ -241,9 +253,53 @@ export default function WebSocketProvider({
       };
     };
 
+    const connectBulkEmailSend = () => {
+      const ws = new WebSocket(getBulkEmailSendWebSocketUrl(user.id));
+      bulkEmailSendWsRef.current = ws;
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const { type, data } = message;
+          if (!type || !data) return;
+          if (type !== BULK_JOB_APPLICATION_EMAIL_SEND_LOG) return;
+          dispatch(
+            addBulkEmailSendLogFromSocket({
+              id: data.id,
+              bulk_job_application_email_send_id:
+                data.bulk_job_application_email_send_id,
+              action: data.action,
+              progress: data.progress,
+              status: data.status,
+              details: data.details,
+              meta_data: data.meta_data || {},
+              created_at: data.created_at,
+            })
+          );
+        } catch {
+          return;
+        }
+      };
+      ws.onclose = () => {
+        bulkEmailSendWsRef.current = null;
+        const delay = Math.min(
+          1000 * 2 ** bulkEmailSendAttemptsRef.current,
+          30000
+        );
+        bulkEmailSendAttemptsRef.current += 1;
+        bulkEmailSendReconnectRef.current = setTimeout(
+          connectBulkEmailSend,
+          delay
+        );
+      };
+      ws.onopen = () => {
+        bulkEmailSendAttemptsRef.current = 0;
+      };
+    };
+
     connectScrapJob();
     connectScrapClient();
     connectBulkJobApplication();
+    connectBulkEmailSend();
 
     return () => {
       if (scrapJobReconnectRef.current) {
@@ -255,9 +311,16 @@ export default function WebSocketProvider({
       if (bulkJobApplicationReconnectRef.current) {
         clearTimeout(bulkJobApplicationReconnectRef.current);
       }
+      if (bulkEmailSendReconnectRef.current) {
+        clearTimeout(bulkEmailSendReconnectRef.current);
+      }
       if (bulkJobApplicationWsRef.current) {
         bulkJobApplicationWsRef.current.close();
         bulkJobApplicationWsRef.current = null;
+      }
+      if (bulkEmailSendWsRef.current) {
+        bulkEmailSendWsRef.current.close();
+        bulkEmailSendWsRef.current = null;
       }
       if (scrapJobWsRef.current) {
         scrapJobWsRef.current.close();
