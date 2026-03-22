@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import {
   HiOutlineBriefcase,
   HiOutlineDocumentText,
+  HiOutlineEnvelope,
   HiOutlineGlobeAlt,
   HiOutlineUserGroup,
   HiOutlineChartBar,
@@ -25,8 +26,8 @@ function timeAgo(date: string | null): string {
 
 function StatsSkeleton() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {[...Array(4)].map((_, i) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+      {[...Array(5)].map((_, i) => (
         <div
           key={i}
           className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6"
@@ -73,34 +74,40 @@ export default function DashboardPage() {
 
   const statCards = [
     {
-      label: "Total Jobs Executed",
+      label: "Jobs Executed",
       value: stats?.total_jobs_executed ?? 0,
       icon: HiOutlineBriefcase,
       accent: "text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30",
     },
     {
-      label: "Total Job Records Fetched",
+      label: "Jobs Fetched",
       value: stats?.total_job_records ?? 0,
       icon: HiOutlineDocumentText,
       accent: "text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30",
     },
     {
-      label: "Total Job Sites",
+      label: "Job Sites",
       value: stats?.total_job_sites ?? 0,
       icon: HiOutlineGlobeAlt,
       accent: "text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30",
     },
     {
-      label: "Total Clients",
+      label: "Clients",
       value: stats?.total_clients ?? 0,
       icon: HiOutlineUserGroup,
       accent: "text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30",
+    },
+    {
+      label: "Job Email Logs",
+      value: stats?.total_job_email_logs ?? 0,
+      icon: HiOutlineEnvelope,
+      accent: "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30",
     },
   ];
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         {statCards.map((card) => (
           <div
             key={card.label}
@@ -120,7 +127,7 @@ export default function DashboardPage() {
           </div>
         ))}
         {stats?.active_jobs_by_fit && (
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 lg:col-span-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 lg:col-span-6">
             <div className="flex items-center gap-4 mb-4">
               <div className="p-3 rounded-lg text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30">
                 <HiOutlineChartBar className="w-6 h-6" />

@@ -16,6 +16,8 @@ export const careerJobService = {
     search?: string;
     show_unseen_jobs?: boolean;
     has_client_emails?: boolean;
+    created_date_from?: string;
+    created_date_to?: string;
   }) {
     const { data } = await api.get<PaginatedResponse<CareerJob>>(
       "/career-jobs",
@@ -57,9 +59,19 @@ export const careerJobService = {
     return data;
   },
 
-  async markAllJobsSeen() {
+  async markAllJobsSeen(filters?: {
+    job_site_id?: number;
+    career_client_id?: number;
+    category?: string;
+    search?: string;
+    show_unseen_jobs?: boolean;
+    has_client_emails?: boolean;
+    created_date_from?: string;
+    created_date_to?: string;
+  }) {
     const { data } = await api.post<{ marked_count: number }>(
-      "/career-jobs/mark-all-seen"
+      "/career-jobs/mark-all-seen",
+      filters || {}
     );
     return data;
   },

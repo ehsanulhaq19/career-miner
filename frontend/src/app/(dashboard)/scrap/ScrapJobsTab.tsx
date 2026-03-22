@@ -56,6 +56,7 @@ export default function ScrapJobsTab() {
     job_site_id: 0,
     load_more_on_scroll: false,
     max_scroll: 10,
+    depth_levels: 0,
   });
   const [starting, setStarting] = useState(false);
   const [actioningId, setActioningId] = useState<number | null>(null);
@@ -73,6 +74,7 @@ export default function ScrapJobsTab() {
     process_with_llm: true,
     load_more_on_scroll: false,
     max_scroll: 10,
+    depth_levels: 0,
   });
   const [testSubmitting, setTestSubmitting] = useState(false);
 
@@ -105,11 +107,12 @@ export default function ScrapJobsTab() {
           job_site_id: startForm.job_site_id,
           load_more_on_scroll: startForm.load_more_on_scroll,
           max_scroll: startForm.max_scroll,
+          depth_levels: startForm.depth_levels ?? undefined,
         })
       ).unwrap();
       setToast({ type: "success", text: "Scrap job started." });
       setStartModalOpen(false);
-      setStartForm({ job_site_id: 0, load_more_on_scroll: false, max_scroll: 10 });
+      setStartForm({ job_site_id: 0, load_more_on_scroll: false, max_scroll: 10, depth_levels: 0 });
       dispatch(fetchScrapJobs({ limit: 100 }));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to start scrap job.";
@@ -166,6 +169,7 @@ export default function ScrapJobsTab() {
           process_with_llm: testForm.process_with_llm,
           load_more_on_scroll: testForm.load_more_on_scroll,
           max_scroll: testForm.max_scroll,
+          depth_levels: testForm.depth_levels,
         })
       ).unwrap();
       setToast({ type: "success", text: "Test scrap job started." });
@@ -177,6 +181,7 @@ export default function ScrapJobsTab() {
         process_with_llm: true,
         load_more_on_scroll: false,
         max_scroll: 10,
+        depth_levels: 0,
       });
       dispatch(fetchScrapJobs({ limit: 100 }));
     } catch (err: unknown) {
@@ -349,6 +354,24 @@ export default function ScrapJobsTab() {
                   />
                 </div>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Depth Levels
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={startForm.depth_levels}
+                  onChange={(e) =>
+                    setStartForm((f) => ({
+                      ...f,
+                      depth_levels: Math.min(5, Math.max(0, Number(e.target.value) || 0)),
+                    }))
+                  }
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+                />
+              </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
               <button
@@ -505,6 +528,24 @@ export default function ScrapJobsTab() {
                   />
                 </div>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Depth Levels
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={testForm.depth_levels}
+                  onChange={(e) =>
+                    setTestForm((f) => ({
+                      ...f,
+                      depth_levels: Math.min(5, Math.max(0, Number(e.target.value) || 0)),
+                    }))
+                  }
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+                />
+              </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
               <button

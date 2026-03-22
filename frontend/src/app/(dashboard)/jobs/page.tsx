@@ -43,9 +43,13 @@ export default function JobsPage() {
         skip,
         limit,
         job_site_id: filters.job_site_id,
+        career_client_id: filters.career_client_id,
         category: filters.category,
         search: filters.search,
         show_unseen_jobs: filters.show_unseen_jobs,
+        has_client_emails: filters.has_client_emails,
+        created_date_from: filters.created_date_from,
+        created_date_to: filters.created_date_to,
       })
     );
   }, [dispatch, page, limit, filters]);
@@ -91,7 +95,28 @@ export default function JobsPage() {
   };
 
   const handleMarkAllSeen = () => {
-    dispatch(markAllJobsSeen());
+    dispatch(
+      markAllJobsSeen({
+        job_site_id: filters.job_site_id,
+        career_client_id: filters.career_client_id,
+        category: filters.category,
+        search: filters.search,
+        show_unseen_jobs: filters.show_unseen_jobs,
+        has_client_emails: filters.has_client_emails,
+        created_date_from: filters.created_date_from,
+        created_date_to: filters.created_date_to,
+      })
+    );
+  };
+
+  const handleDateFromChange = (value: string) => {
+    dispatch(setFilters({ created_date_from: value || undefined }));
+    dispatch(setPage(1));
+  };
+
+  const handleDateToChange = (value: string) => {
+    dispatch(setFilters({ created_date_to: value || undefined }));
+    dispatch(setPage(1));
   };
 
   const totalPages = Math.ceil(total / limit);
@@ -100,7 +125,9 @@ export default function JobsPage() {
     filters.search ||
     filters.job_site_id ||
     filters.category ||
-    filters.show_unseen_jobs;
+    filters.show_unseen_jobs ||
+    filters.created_date_from ||
+    filters.created_date_to;
 
   return (
     <div className="space-y-6">
@@ -133,6 +160,20 @@ export default function JobsPage() {
             value={filters.category ?? ""}
             onChange={(e) => handleCategoryFilter(e.target.value)}
             placeholder="Category"
+            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors sm:w-40"
+          />
+          <input
+            type="date"
+            value={filters.created_date_from ?? ""}
+            onChange={(e) => handleDateFromChange(e.target.value)}
+            placeholder="From date"
+            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors sm:w-40"
+          />
+          <input
+            type="date"
+            value={filters.created_date_to ?? ""}
+            onChange={(e) => handleDateToChange(e.target.value)}
+            placeholder="To date"
             className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors sm:w-40"
           />
           <label className="flex items-center gap-2 cursor-pointer">

@@ -8,9 +8,14 @@ from email.mime.text import MIMEText
 import aiosmtplib
 
 from app.config import get_settings
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import async_session
-from app.modules.email.crud import create_email_log
+from app.modules.email.crud import (
+    create_email_log,
+    get_job_email_log_detail,
+    get_job_email_logs,
+    get_job_email_logs_count,
+)
 
 
 class EmailService:
@@ -110,3 +115,124 @@ class EmailService:
                 email_log_id = email_log.id
 
         return {"status": status, "response": response, "email_log_id": email_log_id}
+
+
+async def list_job_email_logs(
+    db,
+    skip: int = 0,
+    limit: int = 20,
+    career_client_id: int | None = None,
+    created_date_from: str | None = None,
+    created_date_to: str | None = None,
+    search: str | None = None,
+):
+    """
+    Return paginated job email logs with optional filters.
+    """
+    from datetime import datetime
+
+    from app.modules.email.schemas import (
+        JobEmailLogItemResponse,
+        JobEmailLogListResponse,
+    )
+
+    parsed_from = None
+    parsed_to = None
+    if created_date_from:
+        try:
+            parsed_from = datetime.strptime(created_date_from, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    if created_date_to:
+        try:
+            parsed_to = datetime.strptime(created_date_to, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    rows, total = await get_job_email_logs(
+        db,
+        skip=skip,
+        limit=limit,
+        career_client_id=career_client_id,
+        created_date_from=parsed_from,
+        created_date_to=parsed_to,
+        search=search,
+    )
+
+    items = []
+    for log, ja, cj, cc in rows:
+        items.append(
+            JobEmailLogItemResponse(
+                id=log.id,
+                subject=log.subject,
+                content=log.content,
+                file_attachment=log.file_attachment,
+                to_email=log.to_email,
+                from_email=log.from_email,
+                response=log.response,
+                status=log.status,
+                created_at=log.created_at,
+                job_application_id=ja.id,
+                career_job_id=cj.id,
+                career_job_title=cj.title,
+                career_client_id=cc.id if cc else None,
+                career_client_name=cc.name if cc else None,
+            )
+        )
+
+    page = (skip // limit) + 1 if limit > 0 else 1
+    return JobEmailLogListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_job_email_log_detail_by_id(db, email_log_id: int):
+    """
+    Return full job email log detail with linked job and client data.
+    """
+    from app.modules.email.schemas import JobEmailLogDetailResponse
+
+    row = await get_job_email_log_detail(db, email_log_id)
+    if row is None:
+        raise NotFoundException(detail="Job email log not found")
+
+    log, ja, cj, cc = row
+    job_application = {
+        "id": ja.id,
+        "application_name": ja.application_name,
+        "subject": ja.subject,
+        "cover_letter": ja.cover_letter,
+        "to_emails": ja.to_emails or [],
+    }
+    career_job = {
+        "id": cj.id,
+        "title": cj.title,
+        "description": cj.description,
+        "url": cj.url,
+    }
+    career_client = None
+    if cc:
+        career_client = {
+            "id": cc.id,
+            "name": cc.name,
+            "official_website": cc.official_website,
+            "emails": cc.emails or [],
+        }
+
+    return JobEmailLogDetailResponse(
+        id=log.id,
+        subject=log.subject,
+        content=log.content,
+        file_attachment=log.file_attachment,
+        to_email=log.to_email,
+        from_email=log.from_email,
+        response=log.response,
+        status=log.status,
+        created_at=log.created_at,
+        job_application=job_application,
+        career_job=career_job,
+        career_client=career_client,
+    )

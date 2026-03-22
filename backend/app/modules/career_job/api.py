@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -10,6 +10,7 @@ from app.modules.career_job.schemas import (
     CareerJobListResponse,
     CareerJobWithCountsListResponse,
     DashboardStatsResponse,
+    MarkAllJobsSeenRequest,
     MarkJobSeenRequest,
 )
 from app.modules.career_job.service import (
@@ -104,11 +105,27 @@ async def mark_job_seen_endpoint(
 
 @router.post("/mark-all-seen")
 async def mark_all_jobs_seen_endpoint(
+    request: MarkAllJobsSeenRequest = Body(default=MarkAllJobsSeenRequest()),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Mark all career jobs as seen by the current user."""
-    return await mark_all_jobs_seen(db, current_user.id)
+    """
+    Mark career jobs as seen by the current user.
+    Accepts same filter params as list endpoint; when provided, only matching jobs are marked.
+    """
+    body = request or MarkAllJobsSeenRequest()
+    return await mark_all_jobs_seen(
+        db,
+        current_user.id,
+        job_site_id=body.job_site_id,
+        career_client_id=body.career_client_id,
+        category=body.category,
+        search=body.search,
+        show_unseen_jobs=body.show_unseen_jobs,
+        has_client_emails=body.has_client_emails,
+        created_date_from=body.created_date_from,
+        created_date_to=body.created_date_to,
+    )
 
 
 @router.get("/{career_job_id}", response_model=CareerJobDetailResponse)

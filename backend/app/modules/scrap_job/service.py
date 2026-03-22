@@ -30,6 +30,7 @@ async def start_scrap_job(
     job_site_id: int,
     load_more_on_scroll: bool = False,
     max_scroll: int = 10,
+    depth_levels: int | None = None,
 ) -> ScrapJobResponse:
     """
     Create and start a new scrap job for the given job site.
@@ -49,6 +50,7 @@ async def start_scrap_job(
     meta_data = {
         "load_more_on_scroll": load_more_on_scroll,
         "max_scroll": max_scroll,
+        "depth_levels": depth_levels,
     }
     scrap_job = await create_scrap_job(
         db,
@@ -184,6 +186,7 @@ async def start_test_scrap_job(
     meta_data = {
         "load_more_on_scroll": request.load_more_on_scroll,
         "max_scroll": request.max_scroll,
+        "depth_levels": request.depth_levels,
     }
     scrap_job = await create_scrap_job(
         db,

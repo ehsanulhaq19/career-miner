@@ -18,9 +18,21 @@ export const markJobSeen = createAsyncThunk(
 
 export const markAllJobsSeen = createAsyncThunk(
   "careerJob/markAllSeen",
-  async (_, { rejectWithValue }) => {
+  async (
+    filters: {
+      job_site_id?: number;
+      career_client_id?: number;
+      category?: string;
+      search?: string;
+      show_unseen_jobs?: boolean;
+      has_client_emails?: boolean;
+      created_date_from?: string;
+      created_date_to?: string;
+    } | undefined,
+    { rejectWithValue }
+  ) => {
     try {
-      return await careerJobService.markAllJobsSeen();
+      return await careerJobService.markAllJobsSeen(filters);
     } catch (error: any) {
       return rejectWithValue(
         error.response?.data?.detail || "Failed to mark all jobs as seen"
@@ -31,9 +43,13 @@ export const markAllJobsSeen = createAsyncThunk(
 
 interface CareerJobFilters {
   job_site_id?: number;
+  career_client_id?: number;
   category?: string;
   search?: string;
   show_unseen_jobs?: boolean;
+  has_client_emails?: boolean;
+  created_date_from?: string;
+  created_date_to?: string;
 }
 
 interface CareerJobState {
@@ -66,8 +82,13 @@ export const fetchCareerJobs = createAsyncThunk(
           skip?: number;
           limit?: number;
           job_site_id?: number;
+          career_client_id?: number;
           category?: string;
           search?: string;
+          show_unseen_jobs?: boolean;
+          has_client_emails?: boolean;
+          created_date_from?: string;
+          created_date_to?: string;
         }
       | undefined,
     { rejectWithValue }

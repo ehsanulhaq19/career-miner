@@ -9,6 +9,7 @@ class ScrapJobStartRequest(BaseModel):
     job_site_id: int
     load_more_on_scroll: bool = False
     max_scroll: int = Field(default=10, ge=1, le=100)
+    depth_levels: int = Field(default=0, ge=0, le=5)
 
 
 class TestScrapRequest(BaseModel):
@@ -20,6 +21,7 @@ class TestScrapRequest(BaseModel):
     process_with_llm: bool = True
     load_more_on_scroll: bool = False
     max_scroll: int = Field(default=10, ge=1, le=100)
+    depth_levels: int = Field(default=0, ge=0, le=5)
 
 
 class ScrapJobResponse(BaseModel):

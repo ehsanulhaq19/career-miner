@@ -48,6 +48,7 @@ export const startScrapJob = createAsyncThunk(
       job_site_id: number;
       load_more_on_scroll?: boolean;
       max_scroll?: number;
+      depth_levels?: number;
     },
     { rejectWithValue }
   ) => {
@@ -71,6 +72,7 @@ export const testScrapJob = createAsyncThunk(
       process_with_llm: boolean;
       load_more_on_scroll?: boolean;
       max_scroll?: number;
+      depth_levels?: number;
     },
     { rejectWithValue }
   ) => {

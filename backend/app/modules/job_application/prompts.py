@@ -26,7 +26,7 @@ Return a JSON object with this exact structure:
   "similarity_score": 0,
   "subject": "email subject line for the job application",
   "cover_letter": "professional cover letter tailored to the job and company. Use a general greeting only (e.g. Dear Hiring Manager, Hello) - do not include any person's name in the greeting.",
-  "to_emails": ["list of email addresses from client_emails that are most suitable for sending job application - prefer hiring/careers/recruitment emails"],
+  "to_emails": ["list of email addresses from client_emails that are most suitable for sending job application - prefer hiring/careers/recruitment emails, ignore support, help desk, query emails"],
   "resume_content": {{
     "personal_info": {{
       "name": "",

@@ -68,6 +68,20 @@ JOB_LISTING_KEYWORDS = [
     "role",
 ]
 
+# Sites known to block simple HTTP clients; use Playwright by default for these.
+# Includes international variants (e.g. indeed.co.uk, indeed.de).
+ANTI_BOT_DOMAIN_PATTERNS = ("indeed.", "glassdoor.", "monster.", "ziprecruiter.")
+
+# Rotating User-Agents to reduce fingerprinting and 403 blocks.
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+]
+
 
 class ScraperService:
     """Handles fetching, parsing, and persisting scraped job listings from external sites."""
@@ -82,11 +96,14 @@ class ScraperService:
         process_with_llm: bool = True,
         load_more_on_scroll: bool = False,
         max_scroll: int = 10,
+        depth_levels: int = 0,
     ) -> None:
         """
         Execute scraping for a single job site and save found jobs.
         Accepts optional overrides for categories, max pages, LLM processing,
-        and scroll-based loading for infinite scroll pages.
+        scroll-based loading, and depth_levels for multi-level link following.
+        When depth_levels is set, follows links up to that depth (0=parent only).
+        Deduplicates jobs by title and link, keeping the latest parsed data.
         """
         refreshed = await get_scrap_job_by_id(db, scrap_job.id)
         if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
@@ -106,9 +123,9 @@ class ScraperService:
             effective_max_pages = max_pages_per_scrap if max_pages_per_scrap is not None else settings.MAX_PAGES_PER_SCRAP
             visited: set[str] = set()
             queued: set[str] = set()
-            all_jobs: list[dict] = []
+            all_jobs_by_key: dict[tuple[str, str], dict] = {}
             base_domain = urlparse(job_site.url).netloc
-            to_visit: deque[str] = deque([job_site.url])
+            to_visit: deque[tuple[str, int]] = deque([(job_site.url, 0)])
             queued.add(self._normalize_url(job_site.url))
             saved_count = 0
             pages_scraped = 0
@@ -139,7 +156,7 @@ class ScraperService:
                         logger.info("Scrap job %d stopped by user", scrap_job.id)
                         break
 
-                    url = to_visit.popleft()
+                    url, current_depth = to_visit.popleft()
                     url_normalized = self._normalize_url(url)
                     if url_normalized in visited:
                         continue
@@ -159,6 +176,8 @@ class ScraperService:
                             html, final_url = await self._fetch_page_with_scroll(
                                 url, max_scroll=max_scroll
                             )
+                        elif self._is_anti_bot_site(url):
+                            html, final_url = await self._fetch_page_playwright(url)
                         else:
                             html, final_url = await self._fetch_page(client, url)
                             
@@ -229,7 +248,11 @@ class ScraperService:
                         )
                         if exists:
                             continue
-                        all_jobs.append(job_data)
+                        links_list = job_data.get("links") or []
+                        primary_link = links_list[0] if links_list else final_url
+                        norm_link = self._normalize_url(primary_link) if primary_link else ""
+                        dedupe_key = (job_data["title"], norm_link)
+                        all_jobs_by_key[dedupe_key] = job_data
                         validated_jobs.append(job_data)
                         jobs_validated += 1
 
@@ -243,7 +266,7 @@ class ScraperService:
                         meta_data={
                             "total_on_page": len(jobs),
                             "new_jobs": jobs_validated,
-                            "total_collected": len(all_jobs),
+                            "total_collected": len(all_jobs_by_key),
                             "jobs": validated_jobs,
                         },
                     )
@@ -258,10 +281,12 @@ class ScraperService:
                         meta_data={"url": final_url},
                     )
                     crawlable_links = self._extract_crawlable_links(html, final_url, base_domain)
+                    next_depth = current_depth + 1
+                    can_follow_links = depth_levels is None or next_depth <= depth_levels
                     for link in crawlable_links:
                         normalized = self._normalize_url(link)
-                        if normalized not in visited and normalized not in queued:
-                            to_visit.append(link)
+                        if normalized not in visited and normalized not in queued and can_follow_links:
+                            to_visit.append((link, next_depth))
                             queued.add(normalized)
 
                     await create_log_and_broadcast(
@@ -271,7 +296,7 @@ class ScraperService:
                         progress=pages_scraped,
                         status="completed",
                         details=f"Found {len(crawlable_links)} crawlable links",
-                        meta_data={"links_count": len(crawlable_links), "queue_size": len(to_visit)},
+                        meta_data={"links_count": len(crawlable_links), "queue_size": len(to_visit), "depth": current_depth},
                     )
 
                     pages_scraped += 1
@@ -284,6 +309,7 @@ class ScraperService:
                     logger.info("Scrap job %d stopped by user", scrap_job.id)
                     return
 
+                all_jobs = list(all_jobs_by_key.values())
                 total_jobs = len(all_jobs)
                 if process_with_llm and total_jobs > 0:
                     await create_log_and_broadcast(
@@ -319,6 +345,10 @@ class ScraperService:
                             detail=job_data.get("description"),
                             size=parsed_data.get("company_size"),
                         )
+
+                        if not career_client:
+                            continue
+                        
                         career_job_data = {
                             "title": job_data["title"],
                             "description": job_data.get("description"),
@@ -337,9 +367,9 @@ class ScraperService:
                             job_site_id=job_site.id,
                             career_client_id=career_client.id,
                         )
-                        if not exists:
+                        if exists:
                             continue
-                        
+
                         await create_career_job(db, career_job_data)
                         await db.commit()
                         saved_count += 1
@@ -397,7 +427,7 @@ class ScraperService:
                     )
                 completion_meta = {
                     "total_jobs_scraped_from_html": total_jobs_scraped_from_html,
-                    "total_jobs_validated": len(all_jobs),
+                    "total_jobs_validated": len(all_jobs_by_key),
                     "total_jobs_created": saved_count,
                 }
                 await update_scrap_job_meta_data(db, scrap_job.id, completion_meta)
@@ -431,6 +461,16 @@ class ScraperService:
                     details=str(exc),
                     meta_data={"job_site_name": job_site.name},
                 )
+            except Exception:
+                pass
+            try:
+                completion_meta = {
+                    "total_jobs_scraped_from_html": total_jobs_scraped_from_html,
+                    "total_jobs_validated": len(all_jobs_by_key),
+                    "total_jobs_created": saved_count,
+                }
+                await update_scrap_job_meta_data(db, scrap_job.id, completion_meta)
+                await db.commit()
             except Exception:
                 pass
             refreshed = await get_scrap_job_by_id(db, scrap_job.id)
@@ -714,20 +754,28 @@ class ScraperService:
                 links.append(full_url)
         return links
 
-    def _browser_headers(self, referer: str | None) -> dict[str, str]:
+    def _get_random_user_agent(self) -> str:
+        """Return a random User-Agent from the pool to reduce fingerprinting."""
+        return random.choice(USER_AGENTS)
+
+    def _is_anti_bot_site(self, url: str) -> bool:
+        """Return True if the URL's domain is known to block simple HTTP clients."""
+        parsed = urlparse(url)
+        domain = (parsed.netloc or "").lower()
+        return any(pattern in domain for pattern in ANTI_BOT_DOMAIN_PATTERNS)
+
+    def _browser_headers(
+        self, referer: str | None, user_agent: str | None = None
+    ) -> dict[str, str]:
         """Return browser-like headers to reduce bot detection."""
         headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/131.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": user_agent or self._get_random_user_agent(),
             "Accept": (
                 "text/html,application/xhtml+xml,application/xml;q=0.9,"
                 "image/avif,image/webp,image/apng,*/*;q=0.8"
             ),
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate",
+            "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
             "Sec-Fetch-Dest": "document",
@@ -756,7 +804,9 @@ class ScraperService:
         if homepage == seed_url:
             return
         try:
-            await client.get(homepage)
+            headers = self._browser_headers(homepage)
+            await client.get(homepage, headers=headers)
+            await asyncio.sleep(random.uniform(1.0, 2.5))
         except Exception as e:
             logger.debug("Warm-up request to %s failed: %s", homepage, e)
 
@@ -770,14 +820,78 @@ class ScraperService:
     async def _fetch_page(
         self, client: httpx.AsyncClient, url: str
     ) -> tuple[str, str]:
-        """Fetch a web page and return (HTML content, final URL after redirects)."""
+        """
+        Fetch a web page and return (HTML content, final URL after redirects).
+        On 403, immediately falls back to Playwright. On 429, retries with backoff.
+        """
         parsed = urlparse(url)
         referer = f"{parsed.scheme}://{parsed.netloc}/"
-        headers = self._browser_headers(referer)
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
-        final_url = str(response.url)
-        return response.text, final_url
+        max_retries = 3
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                headers = self._browser_headers(referer)
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                final_url = str(response.url)
+                return response.text, final_url
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if e.response.status_code == 403:
+                    logger.info("403 on %s, falling back to Playwright", url)
+                    return await self._fetch_page_playwright(url)
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    delay = (2**attempt) + random.uniform(1.0, 2.0)
+                    logger.info(
+                        "Rate limited (429) on %s, retrying in %.1fs",
+                        url,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = (2**attempt) + random.uniform(0.5, 1.5)
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Unexpected fetch failure")
+
+    async def _fetch_page_playwright(self, url: str) -> tuple[str, str]:
+        """
+        Fetch a page using Playwright (real browser). Used for anti-bot sites
+        and as fallback when httpx gets 403.
+        """
+        from playwright.async_api import async_playwright
+
+        settings = get_settings()
+        user_agent = self._get_random_user_agent()
+        async with async_playwright() as p:
+            launch_options: dict = {"headless": True}
+            if settings.SCRAP_HTTP_PROXY:
+                launch_options["proxy"] = {"server": settings.SCRAP_HTTP_PROXY}
+            browser = await p.chromium.launch(**launch_options)
+            context = await browser.new_context(
+                user_agent=user_agent,
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+            )
+            page = await context.new_page()
+            try:
+                await page.goto(url, wait_until="load", timeout=30000)
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+                html = await page.content()
+                final_url = page.url
+                return html, final_url
+            finally:
+                await browser.close()
 
     async def _fetch_page_with_scroll(
         self, url: str, max_scroll: int = 10, scroll_delay: float = 1.5
@@ -789,7 +903,7 @@ class ScraperService:
         from playwright.async_api import async_playwright
 
         settings = get_settings()
-        user_agent = self._browser_headers(url).get("User-Agent", "")
+        user_agent = self._get_random_user_agent()
         async with async_playwright() as p:
             launch_options: dict = {"headless": True}
             if settings.SCRAP_HTTP_PROXY:

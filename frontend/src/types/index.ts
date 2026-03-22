@@ -217,6 +217,7 @@ export interface DashboardStats {
   total_job_records: number;
   total_job_sites: number;
   total_clients: number;
+  total_job_email_logs?: number;
   job_site_cards: JobSiteCard[];
   active_jobs_by_fit?: ActiveJobsByFit;
 }

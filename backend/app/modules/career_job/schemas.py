@@ -56,6 +56,19 @@ class MarkJobSeenRequest(BaseModel):
     career_job_id: int
 
 
+class MarkAllJobsSeenRequest(BaseModel):
+    """Schema for marking filtered career jobs as seen."""
+
+    job_site_id: int | None = None
+    career_client_id: int | None = None
+    category: str | None = None
+    search: str | None = None
+    show_unseen_jobs: bool = False
+    has_client_emails: bool = False
+    created_date_from: str | None = None
+    created_date_to: str | None = None
+
+
 class CareerJobDateGroupResponse(BaseModel):
     """Schema for a date group in the jobs tabular UI."""
 
@@ -124,6 +137,7 @@ class DashboardStatsResponse(BaseModel):
     total_job_records: int
     total_job_sites: int
     total_clients: int
+    total_job_email_logs: int = 0
     job_site_cards: list[JobSiteCardResponse]
     active_jobs_by_fit: ActiveJobsByFitResponse = Field(
         default_factory=lambda: ActiveJobsByFitResponse()

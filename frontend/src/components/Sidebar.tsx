@@ -25,6 +25,7 @@ const navItems = [
   { label: "Clients", href: "/clients", icon: HiOutlineUserGroup },
   { label: "Resumes", href: "/resumes", icon: HiOutlineDocumentText },
   { label: "Job Applications", href: "/job-applications", icon: HiOutlinePaperAirplane },
+  { label: "Email Logs", href: "/email-logs", icon: HiOutlineEnvelope },
   { label: "Profile", href: "/profile", icon: HiOutlineUser },
 ];
 

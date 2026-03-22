@@ -10,7 +10,9 @@ from app.modules.career_job.crud import (
     get_career_job_user,
     get_dashboard_stats as crud_dashboard_stats,
     get_seen_career_job_ids_from_list,
+    get_career_job_ids_by_filters,
     mark_all_jobs_seen_for_user,
+    mark_jobs_seen_for_user_by_ids,
 )
 from app.modules.career_job.schemas import (
     CareerJobDetailResponse,
@@ -33,11 +35,28 @@ async def list_career_jobs(
     user_id: int | None = None,
     show_unseen_jobs: bool = False,
     has_client_emails: bool = False,
+    created_date_from: str | None = None,
+    created_date_to: str | None = None,
 ) -> CareerJobListResponse:
     """
     Return a paginated list of career jobs with job site names.
     Results are ordered by created_at descending.
     """
+    from datetime import datetime
+
+    parsed_from = None
+    parsed_to = None
+    if created_date_from:
+        try:
+            parsed_from = datetime.strptime(created_date_from, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    if created_date_to:
+        try:
+            parsed_to = datetime.strptime(created_date_to, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
     items, total = await get_career_jobs(
         db,
         skip=skip,
@@ -49,6 +68,8 @@ async def list_career_jobs(
         user_id=user_id,
         show_unseen_jobs=show_unseen_jobs,
         has_client_emails=has_client_emails,
+        created_date_from=parsed_from,
+        created_date_to=parsed_to,
     )
 
     seen_job_ids: set[int] = set()
@@ -116,9 +137,65 @@ async def get_career_job(
     return job_data
 
 
-async def mark_all_jobs_seen(db: AsyncSession, user_id: int) -> dict:
-    """Mark all career jobs as seen by the user."""
-    count = await mark_all_jobs_seen_for_user(db, user_id)
+async def mark_all_jobs_seen(
+    db: AsyncSession,
+    user_id: int,
+    job_site_id: int | None = None,
+    career_client_id: int | None = None,
+    category: str | None = None,
+    search: str | None = None,
+    show_unseen_jobs: bool = False,
+    has_client_emails: bool = False,
+    created_date_from: str | None = None,
+    created_date_to: str | None = None,
+) -> dict:
+    """
+    Mark career jobs as seen by the user.
+    When filters are provided, only jobs matching filters are marked.
+    """
+    from datetime import datetime
+
+    parsed_from = None
+    parsed_to = None
+    if created_date_from:
+        try:
+            parsed_from = datetime.strptime(created_date_from, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    if created_date_to:
+        try:
+            parsed_to = datetime.strptime(created_date_to, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    filters_provided = any(
+        [
+            job_site_id is not None,
+            career_client_id is not None,
+            category is not None,
+            search is not None,
+            show_unseen_jobs,
+            has_client_emails,
+            parsed_from is not None,
+            parsed_to is not None,
+        ]
+    )
+    if filters_provided:
+        job_ids = await get_career_job_ids_by_filters(
+            db,
+            job_site_id=job_site_id,
+            career_client_id=career_client_id,
+            category=category,
+            search=search,
+            user_id=user_id,
+            show_unseen_jobs=show_unseen_jobs,
+            has_client_emails=has_client_emails,
+            created_date_from=parsed_from,
+            created_date_to=parsed_to,
+        )
+        count = await mark_jobs_seen_for_user_by_ids(db, user_id, job_ids)
+    else:
+        count = await mark_all_jobs_seen_for_user(db, user_id)
     return {"marked_count": count}
 
 
@@ -268,6 +345,7 @@ async def get_dashboard_stats(
         total_job_records=stats["total_job_records"],
         total_job_sites=stats["total_job_sites"],
         total_clients=stats["total_clients"],
+        total_job_email_logs=stats.get("total_job_email_logs", 0),
         job_site_cards=job_site_cards,
         active_jobs_by_fit=ActiveJobsByFitResponse(**active_by_fit),
     )

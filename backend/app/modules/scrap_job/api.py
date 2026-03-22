@@ -32,8 +32,11 @@ async def _run_scraper_background(
     scrap_job_id: int,
     load_more_on_scroll: bool = False,
     max_scroll: int = 10,
+    depth_levels: int = 0,
 ) -> None:
-    """Execute scraper in background with its own database session."""
+    """
+    Execute scraper in background with its own database session.
+    """
     async with async_session() as db:
         try:
             job_site = await get_job_site_by_id(db, job_site_id)
@@ -49,6 +52,7 @@ async def _run_scraper_background(
                 scrap_job,
                 load_more_on_scroll=load_more_on_scroll,
                 max_scroll=max_scroll,
+                depth_levels=depth_levels,
             )
             await db.commit()
         except Exception:
@@ -63,8 +67,11 @@ async def _run_test_scraper_background(
     process_with_llm: bool,
     load_more_on_scroll: bool = False,
     max_scroll: int = 10,
+    depth_levels: int = 0,
 ) -> None:
-    """Execute test scraper in background with custom parameters."""
+    """
+    Execute test scraper in background with custom parameters.
+    """
     async with async_session() as db:
         try:
             job_site = await get_job_site_by_id(db, job_site_id)
@@ -83,6 +90,7 @@ async def _run_test_scraper_background(
                 process_with_llm=process_with_llm,
                 load_more_on_scroll=load_more_on_scroll,
                 max_scroll=max_scroll,
+                depth_levels=depth_levels,
             )
             await db.commit()
         except Exception:
@@ -102,6 +110,7 @@ async def start_scrap_job_endpoint(
         request.job_site_id,
         load_more_on_scroll=request.load_more_on_scroll,
         max_scroll=request.max_scroll,
+        depth_levels=request.depth_levels,
     )
     background_tasks.add_task(
         _run_scraper_background,
@@ -109,6 +118,7 @@ async def start_scrap_job_endpoint(
         result.id,
         request.load_more_on_scroll,
         request.max_scroll,
+        request.depth_levels,
     )
     return result
 
@@ -131,6 +141,7 @@ async def test_scrap_job_endpoint(
         request.process_with_llm,
         request.load_more_on_scroll,
         request.max_scroll,
+        request.depth_levels,
     )
     return result
 
@@ -161,12 +172,14 @@ async def resume_scrap_job_endpoint(
             meta = scrap_job.meta_data or {}
             load_more_on_scroll = meta.get("load_more_on_scroll", False)
             max_scroll = meta.get("max_scroll", 10)
+            depth_levels = meta.get("depth_levels", 0)
             background_tasks.add_task(
                 _run_scraper_background,
                 scrap_job.job_site_id,
                 scrap_job_id,
                 load_more_on_scroll,
                 max_scroll,
+                depth_levels,
             )
     return result
 

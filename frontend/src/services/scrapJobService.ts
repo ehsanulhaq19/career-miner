@@ -23,6 +23,7 @@ export const scrapJobService = {
     job_site_id: number;
     load_more_on_scroll?: boolean;
     max_scroll?: number;
+    depth_levels?: number;
   }) {
     const { data } = await api.post<ScrapJob>("/scrap-jobs/start", params);
     return data;
@@ -35,6 +36,7 @@ export const scrapJobService = {
     process_with_llm: boolean;
     load_more_on_scroll?: boolean;
     max_scroll?: number;
+    depth_levels?: number;
   }) {
     const { data } = await api.post<ScrapJob>("/scrap-jobs/test", params);
     return data;
