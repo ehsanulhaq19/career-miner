@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class CareerClientUpdate(BaseModel):
@@ -51,3 +51,23 @@ class CareerClientLocationsResponse(BaseModel):
     """Schema for list of distinct career client locations."""
 
     locations: list[str]
+
+
+class CareerClientScanCriteria(BaseModel):
+    """Schema for career client scan criteria to deactivate non-compliant clients."""
+
+    min_description: int | None = None
+    matching_words: str | None = None
+
+    @field_validator("min_description")
+    @classmethod
+    def min_description_non_negative(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("min_description must be non-negative")
+        return v
+
+
+class CareerClientScanResponse(BaseModel):
+    """Schema for career client scan result."""
+
+    deactivated_count: int

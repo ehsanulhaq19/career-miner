@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.models import CareerClient
@@ -167,6 +167,40 @@ async def get_distinct_career_client_locations(
         .order_by(CareerClient.location)
     )
     return [row[0] for row in result.all() if row[0]]
+
+
+async def scan_and_deactivate_career_clients(
+    db: AsyncSession,
+    min_description: int | None = None,
+    matching_words: list[str] | None = None,
+) -> int:
+    """
+    Deactivate active career clients that fail the given criteria.
+    Returns count of deactivated clients.
+    """
+    if not min_description and not matching_words:
+        return 0
+    conditions = []
+    if min_description is not None:
+        detail_length = func.coalesce(func.length(CareerClient.detail), 0)
+        conditions.append(detail_length < min_description)
+    if matching_words:
+        words = [w.strip() for w in matching_words if w and w.strip()]
+        if words:
+            name_conditions = [
+                CareerClient.name.ilike(f"%{w}%") for w in words
+            ]
+            conditions.append(or_(*name_conditions))
+    if not conditions:
+        return 0
+    stmt = (
+        update(CareerClient)
+        .where(CareerClient.is_active.is_(True))
+        .where(or_(*conditions))
+        .values(is_active=False)
+    )
+    result = await db.execute(stmt)
+    return result.rowcount or 0
 
 
 async def get_or_create_career_client(

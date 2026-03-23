@@ -5,6 +5,7 @@ from app.modules.career_client.crud import (
     get_career_client_by_id as crud_get_career_client_by_id,
     get_career_clients,
     get_distinct_career_client_locations as crud_get_locations,
+    scan_and_deactivate_career_clients as crud_scan_and_deactivate,
     get_total_career_clients_count,
     update_career_client as crud_update_career_client,
 )
@@ -13,6 +14,8 @@ from app.modules.career_client.schemas import (
     CareerClientListResponse,
     CareerClientLocationsResponse,
     CareerClientResponse,
+    CareerClientScanCriteria,
+    CareerClientScanResponse,
     CareerClientUpdate,
 )
 
@@ -80,3 +83,26 @@ async def get_career_client_locations(
     """Return all distinct locations from career clients."""
     locations = await crud_get_locations(db)
     return CareerClientLocationsResponse(locations=locations)
+
+
+async def scan_career_clients(
+    db: AsyncSession, criteria: CareerClientScanCriteria
+) -> CareerClientScanResponse:
+    """
+    Scan active career clients and deactivate those failing the given criteria.
+    Returns count of deactivated clients.
+    """
+    min_description = criteria.min_description
+    matching_words = None
+    if criteria.matching_words and criteria.matching_words.strip():
+        matching_words = [
+            w.strip()
+            for w in criteria.matching_words.split(",")
+            if w.strip()
+        ]
+    deactivated_count = await crud_scan_and_deactivate(
+        db,
+        min_description=min_description,
+        matching_words=matching_words,
+    )
+    return CareerClientScanResponse(deactivated_count=deactivated_count)

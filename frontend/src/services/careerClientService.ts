@@ -64,4 +64,14 @@ export const careerClientService = {
     );
     return data;
   },
+  async scanCareerClients(criteria: {
+    min_description?: number | null;
+    matching_words?: string | null;
+  }) {
+    const { data } = await api.post<{ deactivated_count: number }>(
+      "/career-clients/scan",
+      criteria
+    );
+    return data;
+  },
 };

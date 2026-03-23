@@ -9,6 +9,7 @@ from app.modules.career_client.schemas import (
     CareerClientListResponse,
     CareerClientLocationsResponse,
     CareerClientResponse,
+    CareerClientScanCriteria,
     CareerClientUpdate,
 )
 from app.modules.career_client.service import (
@@ -16,6 +17,7 @@ from app.modules.career_client.service import (
     get_career_client_by_id,
     get_career_client_locations,
     list_career_clients,
+    scan_career_clients,
     update_career_client,
 )
 
@@ -87,3 +89,24 @@ async def bulk_update_career_clients_endpoint(
     """Bulk update career clients by location."""
     count = await bulk_update_career_clients(db, location, bulk_update)
     return {"updated_count": count}
+
+
+@router.post("/scan")
+async def scan_career_clients_endpoint(
+    criteria: CareerClientScanCriteria,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Scan active career clients and deactivate those failing the given criteria.
+    Returns count of deactivated clients.
+    """
+    has_min_desc = criteria.min_description is not None
+    has_words = criteria.matching_words and criteria.matching_words.strip()
+    if not has_min_desc and not has_words:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one criterion must be provided",
+        )
+    result = await scan_career_clients(db, criteria)
+    return {"deactivated_count": result.deactivated_count}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
+  HiOutlineMagnifyingGlassCircle,
   HiOutlinePencilSquare,
   HiOutlineUserGroup,
 } from "react-icons/hi2";
@@ -16,6 +17,7 @@ import {
 import { CareerClient } from "@/types";
 import ClientDetailModal from "@/components/ClientDetailModal";
 import BulkEditModal from "@/components/BulkEditModal";
+import ScanClientsModal from "@/components/ScanClientsModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
@@ -25,6 +27,7 @@ export default function ClientsPage() {
     null
   );
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [scanModalOpen, setScanModalOpen] = useState(false);
 
   const getHasEmailParam = () => {
     if (hasEmailFilter === "with") return true;
@@ -56,8 +59,10 @@ export default function ClientsPage() {
 
   const totalPages = Math.ceil(total / limit);
 
-  const handleHasEmailFilterChange = (checked: boolean) => {
-    dispatch(setHasEmailInformation(checked));
+  const handleHasEmailFilterChange = (
+    value: "all" | "with" | "without"
+  ) => {
+    dispatch(setHasEmailFilter(value));
     dispatch(setPage(1));
   };
 
@@ -68,6 +73,13 @@ export default function ClientsPage() {
           Clients
         </h2>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setScanModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlineMagnifyingGlassCircle className="w-4 h-4" />
+            Scan Clients
+          </button>
           <button
             onClick={() => setBulkEditOpen(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
@@ -160,6 +172,11 @@ export default function ClientsPage() {
       <BulkEditModal
         isOpen={bulkEditOpen}
         onClose={() => setBulkEditOpen(false)}
+        onUpdated={refetch}
+      />
+      <ScanClientsModal
+        isOpen={scanModalOpen}
+        onClose={() => setScanModalOpen(false)}
         onUpdated={refetch}
       />
     </div>
