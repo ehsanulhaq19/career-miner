@@ -5,10 +5,18 @@ from app.modules.career_client.models import CareerClient
 
 
 def _apply_has_email_filter(query, has_email_information: bool | None):
-    """Apply email filter to query when has_email_information is True."""
-    if has_email_information is not True:
+    """
+    Apply email filter to query based on has_email_information.
+    True: only clients with emails. False: only clients without emails. None: no filter.
+    """
+    if has_email_information is None:
         return query
-    return query.where(func.json_array_length(CareerClient.emails) > 0)
+    if has_email_information is True:
+        return query.where(func.json_array_length(CareerClient.emails) > 0)
+    return query.where(
+        (func.coalesce(func.json_array_length(CareerClient.emails), 0) == 0)
+        | (CareerClient.emails.is_(None))
+    )
 
 
 async def get_career_clients(
@@ -32,6 +40,11 @@ async def get_career_clients(
     if has_email_information is True:
         count_query = count_query.where(
             func.json_array_length(CareerClient.emails) > 0
+        )
+    elif has_email_information is False:
+        count_query = count_query.where(
+            (func.coalesce(func.json_array_length(CareerClient.emails), 0) == 0)
+            | (CareerClient.emails.is_(None))
         )
 
     result = await db.execute(query)

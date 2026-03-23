@@ -9,11 +9,14 @@ import {
   HiOutlineBeaker,
   HiOutlineChevronDown,
   HiOutlineChevronRight,
+  HiOutlineGlobeAlt,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchScrapClientJobs,
   startScrapClientJob,
+  startScrapClientFromSite,
+  startScrapClientFromUrl,
   testScrapClientJob,
   stopScrapClientJob,
   resumeScrapClientJob,
@@ -21,6 +24,7 @@ import {
   fetchScrapClientStatus,
 } from "@/store/slices/scrapClientSlice";
 import { fetchCareerClients } from "@/store/slices/careerClientSlice";
+import { fetchClientSites } from "@/store/slices/clientSiteSlice";
 import { ScrapClientJob, ScrapClientLog } from "@/types";
 
 function getStatusBadgeClass(status: string): string {
@@ -57,6 +61,7 @@ export default function ScrapClientsTab() {
     status: statusSummary,
   } = useAppSelector((state) => state.scrapClient);
   const { items: careerClients } = useAppSelector((state) => state.careerClient);
+  const { items: clientSites } = useAppSelector((state) => state.clientSite);
   const [startModalOpen, setStartModalOpen] = useState(false);
   const [startForm, setStartForm] = useState({
     client_ids: [] as number[],
@@ -80,9 +85,20 @@ export default function ScrapClientsTab() {
     url: "",
   });
   const [testSubmitting, setTestSubmitting] = useState(false);
+  const [scrapFromSiteModalOpen, setScrapFromSiteModalOpen] = useState(false);
+  const [scrapFromSiteForm, setScrapFromSiteForm] = useState({ client_site_id: 0 });
+  const [scrapFromSiteStarting, setScrapFromSiteStarting] = useState(false);
+  const [scrapFromUrlModalOpen, setScrapFromUrlModalOpen] = useState(false);
+  const [scrapFromUrlForm, setScrapFromUrlForm] = useState({ url: "" });
+  const [scrapFromUrlStarting, setScrapFromUrlStarting] = useState(false);
+  const [scrapDropdownOpen, setScrapDropdownOpen] = useState(false);
 
   useEffect(() => {
     dispatch(fetchCareerClients({ skip: 0, limit: 500 }));
+  }, [dispatch]);
+
+  useEffect(() => {
+    dispatch(fetchClientSites());
   }, [dispatch]);
 
   useEffect(() => {
@@ -164,6 +180,47 @@ export default function ScrapClientsTab() {
   const handleOpenLogs = (job: ScrapClientJob) => {
     setLogsModalJobId(job.id);
     dispatch(fetchScrapClientLogs(job.id));
+  };
+
+  const handleScrapFromClientSite = async () => {
+    if (!scrapFromSiteForm.client_site_id) return;
+    setScrapFromSiteStarting(true);
+    try {
+      await dispatch(
+        startScrapClientFromSite(scrapFromSiteForm.client_site_id)
+      ).unwrap();
+      setToast({ type: "success", text: "Scrap from client site started." });
+      setScrapFromSiteModalOpen(false);
+      setScrapDropdownOpen(false);
+      setScrapFromSiteForm({ client_site_id: 0 });
+      dispatch(fetchScrapClientJobs({ limit: 100 }));
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to start scrap from client site.";
+      setToast({ type: "error", text: msg });
+    } finally {
+      setScrapFromSiteStarting(false);
+    }
+  };
+
+  const handleScrapFromUrl = async () => {
+    const url = scrapFromUrlForm.url.trim();
+    if (!url) return;
+    setScrapFromUrlStarting(true);
+    try {
+      await dispatch(startScrapClientFromUrl(url)).unwrap();
+      setToast({ type: "success", text: "Scrap clients from URL started." });
+      setScrapFromUrlModalOpen(false);
+      setScrapDropdownOpen(false);
+      setScrapFromUrlForm({ url: "" });
+      dispatch(fetchScrapClientJobs({ limit: 100 }));
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to start scrap from URL.";
+      setToast({ type: "error", text: msg });
+    } finally {
+      setScrapFromUrlStarting(false);
+    }
   };
 
   const handleTestScrapSubmit = async () => {
@@ -269,14 +326,61 @@ export default function ScrapClientsTab() {
           Scrap Clients
         </h3>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setStartModalOpen(true)}
-            disabled={hasActiveJob}
-            className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <HiOutlinePlay className="w-4 h-4" />
-            Start Scrap Job
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setScrapDropdownOpen((o) => !o)}
+              disabled={hasActiveJob}
+              className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <HiOutlinePlay className="w-4 h-4" />
+              Scrap Clients
+              <HiOutlineChevronDown className="w-4 h-4" />
+            </button>
+            {scrapDropdownOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setScrapDropdownOpen(false)}
+                  aria-hidden="true"
+                />
+                <div className="absolute right-0 mt-1 w-56 z-50 py-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
+                  <button
+                    onClick={() => {
+                      setScrapFromSiteModalOpen(true);
+                      setScrapDropdownOpen(false);
+                    }}
+                    disabled={hasActiveJob}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    <HiOutlineGlobeAlt className="w-4 h-4" />
+                    Scrap from Client Sites
+                  </button>
+                  <button
+                    onClick={() => {
+                      setScrapFromUrlModalOpen(true);
+                      setScrapDropdownOpen(false);
+                    }}
+                    disabled={hasActiveJob}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    <HiOutlineGlobeAlt className="w-4 h-4" />
+                    Scrap Clients with URL
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStartModalOpen(true);
+                      setScrapDropdownOpen(false);
+                    }}
+                    disabled={hasActiveJob}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    <HiOutlinePlay className="w-4 h-4" />
+                    Start Scrap Job (emails)
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setTestModalOpen(true)}
             className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
@@ -317,6 +421,117 @@ export default function ScrapClientsTab() {
             <div className="text-sm text-gray-500 dark:text-gray-400">Failed</div>
             <div className="text-xl font-semibold text-red-600 dark:text-red-400">
               {statusSummary.failed}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {scrapFromSiteModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => !scrapFromSiteStarting && setScrapFromSiteModalOpen(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Scrap Clients from Client Site
+              </h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Client Site
+                </label>
+                <select
+                  value={scrapFromSiteForm.client_site_id || ""}
+                  onChange={(e) =>
+                    setScrapFromSiteForm({
+                      client_site_id: Number(e.target.value) || 0,
+                    })
+                  }
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+                >
+                  <option value="">Select client site</option>
+                  {clientSites.filter((s) => s.is_active).map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
+              <button
+                onClick={() => !scrapFromSiteStarting && setScrapFromSiteModalOpen(false)}
+                disabled={scrapFromSiteStarting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleScrapFromClientSite}
+                disabled={!scrapFromSiteForm.client_site_id || scrapFromSiteStarting}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {scrapFromSiteStarting ? "Starting..." : "Start"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {scrapFromUrlModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() =>
+            !scrapFromUrlStarting && setScrapFromUrlModalOpen(false)
+          }
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Scrap Clients from URL
+              </h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  URL
+                </label>
+                <input
+                  type="url"
+                  value={scrapFromUrlForm.url}
+                  onChange={(e) =>
+                    setScrapFromUrlForm({ ...scrapFromUrlForm, url: e.target.value })
+                  }
+                  placeholder="https://example.com/directory/companies"
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+                />
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
+              <button
+                onClick={() =>
+                  !scrapFromUrlStarting && setScrapFromUrlModalOpen(false)
+                }
+                disabled={scrapFromUrlStarting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleScrapFromUrl}
+                disabled={!scrapFromUrlForm.url.trim() || scrapFromUrlStarting}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {scrapFromUrlStarting ? "Starting..." : "Start"}
+              </button>
             </div>
           </div>
         </div>
@@ -416,6 +631,28 @@ export default function ScrapClientsTab() {
               </h3>
             </div>
             <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Client Site (optional)
+                </label>
+                <select
+                  value={testForm.client_site_id || ""}
+                  onChange={(e) =>
+                    setTestForm((f) => ({
+                      ...f,
+                      client_site_id: Number(e.target.value) || 0,
+                    }))
+                  }
+                  className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+                >
+                  <option value="">Select client site</option>
+                  {clientSites.map((site) => (
+                    <option key={site.id} value={site.id}>
+                      {site.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   URL (optional - crawl this URL to fetch emails)
@@ -562,6 +799,11 @@ export default function ScrapClientsTab() {
                             Completed: {job.meta_data.completed ?? "-"}
                           </div>
                           <div>Failed: {job.meta_data.failed ?? "-"}</div>
+                        </div>
+                      ) : job.meta_data &&
+                        job.meta_data.clients_saved !== undefined ? (
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                          Clients: {job.meta_data.clients_saved}
                         </div>
                       ) : (
                         <span className="text-gray-400 dark:text-gray-500">-</span>

@@ -3,6 +3,21 @@ from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String, Text, f
 from app.database import Base
 
 
+class ClientSite(Base):
+    """SQLAlchemy model representing a client site to be scraped for company data."""
+
+    __tablename__ = "client_sites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    url = Column(Text, nullable=False)
+    scrap_duration = Column(Integer, nullable=False, default=60)
+    last_scrapped = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class CareerClient(Base):
     """SQLAlchemy model representing a company/client extracted from job listings."""
 

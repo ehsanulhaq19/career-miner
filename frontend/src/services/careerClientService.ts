@@ -19,7 +19,7 @@ export const careerClientService = {
   async getCareerClients(
     skip = 0,
     limit = 20,
-    hasEmailInformation?: boolean
+    hasEmailInformation?: boolean | null
   ) {
     const params: Record<string, string | number | boolean> = {
       skip,
@@ -27,6 +27,8 @@ export const careerClientService = {
     };
     if (hasEmailInformation === true) {
       params.has_email_information = true;
+    } else if (hasEmailInformation === false) {
+      params.has_email_information = false;
     }
     const { data } = await api.get<PaginatedResponse<CareerClient>>(
       "/career-clients",

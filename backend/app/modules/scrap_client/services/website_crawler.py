@@ -10,7 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import get_settings
-from app.modules.scrap_client.url_utils import extract_root_domain, normalize_url
+from app.modules.scrap_client.services.url_utils import extract_root_domain, normalize_url
 
 logger = logging.getLogger(__name__)
 

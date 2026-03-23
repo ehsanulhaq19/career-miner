@@ -16,7 +16,6 @@ RECRUITER_PREFIXES = [
     "opportunities",
 ]
 
-# Extended prefixes for email guessing when no emails found on website
 EXTENDED_EMAIL_PREFIXES = [
     "info",
     "contact",

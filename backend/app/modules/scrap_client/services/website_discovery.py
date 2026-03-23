@@ -13,8 +13,8 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import get_settings
-from app.modules.scrap_client.email_extractor import extract_emails_from_text
-from app.modules.scrap_client.url_utils import normalize_url
+from app.modules.scrap_client.services.email_extractor import extract_emails_from_text
+from app.modules.scrap_client.services.url_utils import extract_root_domain, normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -640,8 +640,6 @@ def get_domain_candidates_for_guessing(company_name: str) -> list[str]:
     Get list of domain candidates for email guessing when website not found.
     Returns root domains (e.g. example.com) that can be verified.
     """
-    from app.modules.scrap_client.url_utils import extract_root_domain
-
     candidates: list[str] = []
     seen: set[str] = set()
     for url in _generate_domain_candidates(company_name):

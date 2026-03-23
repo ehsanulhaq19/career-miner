@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   HiOutlineHome,
   HiOutlineGlobeAlt,
+  HiOutlineBuildingOffice2,
   HiOutlineBriefcase,
   HiOutlineCpuChip,
   HiOutlineUser,
@@ -20,6 +21,7 @@ import { logoutUser } from "@/store/slices/authSlice";
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: HiOutlineHome },
   { label: "Job Sites", href: "/job-sites", icon: HiOutlineGlobeAlt },
+  { label: "Client Sites", href: "/client-sites", icon: HiOutlineBuildingOffice2 },
   { label: "Scrap", href: "/scrap", icon: HiOutlineCpuChip },
   { label: "Jobs", href: "/jobs", icon: HiOutlineBriefcase },
   { label: "Clients", href: "/clients", icon: HiOutlineUserGroup },

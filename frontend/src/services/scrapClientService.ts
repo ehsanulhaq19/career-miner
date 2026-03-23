@@ -41,6 +41,22 @@ export const scrapClientService = {
     return data;
   },
 
+  async startScrapClientFromSite(client_site_id: number) {
+    const { data } = await api.post<ScrapClientJob>(
+      "/scrap-clients/start-from-site",
+      { client_site_id }
+    );
+    return data;
+  },
+
+  async startScrapClientFromUrl(url: string) {
+    const { data } = await api.post<ScrapClientJob>(
+      "/scrap-clients/start-from-url",
+      { url }
+    );
+    return data;
+  },
+
   async testScrapClientJob(params: {
     client_ids?: number[];
     only_clients_without_emails?: boolean;
@@ -49,6 +65,14 @@ export const scrapClientService = {
     const { data } = await api.post<ScrapClientJob>(
       "/scrap-clients/test",
       params
+    );
+    return data;
+  },
+
+  async testScrapClientFromSite(client_site_id: number) {
+    const { data } = await api.post<ScrapClientJob>(
+      "/scrap-clients/test-from-site",
+      { client_site_id }
     );
     return data;
   },

@@ -2,12 +2,14 @@ import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
 import { careerClientService } from "@/services/careerClientService";
 import { CareerClient } from "@/types";
 
+export type HasEmailFilter = "all" | "with" | "without";
+
 interface CareerClientState {
   items: CareerClient[];
   total: number;
   page: number;
   limit: number;
-  hasEmailInformation: boolean;
+  hasEmailFilter: HasEmailFilter;
   loading: boolean;
   error: string | null;
 }
@@ -17,7 +19,7 @@ const initialState: CareerClientState = {
   total: 0,
   page: 1,
   limit: 20,
-  hasEmailInformation: false,
+  hasEmailFilter: "all",
   loading: false,
   error: null,
 };
@@ -53,8 +55,8 @@ const careerClientSlice = createSlice({
     setPage(state, action: PayloadAction<number>) {
       state.page = action.payload;
     },
-    setHasEmailInformation(state, action: PayloadAction<boolean>) {
-      state.hasEmailInformation = action.payload;
+    setHasEmailFilter(state, action: PayloadAction<HasEmailFilter>) {
+      state.hasEmailFilter = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -76,5 +78,5 @@ const careerClientSlice = createSlice({
   },
 });
 
-export const { setPage, setHasEmailInformation } = careerClientSlice.actions;
+export const { setPage, setHasEmailFilter } = careerClientSlice.actions;
 export default careerClientSlice.reducer;

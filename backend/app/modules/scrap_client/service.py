@@ -25,12 +25,6 @@ from app.modules.scrap_client.crud import (
     update_scrap_client_job_meta_data,
     update_scrap_client_job_status,
 )
-from app.modules.scrap_client.email_extractor import extract_emails_from_html
-from app.modules.scrap_client.email_pattern_generator import (
-    generate_extended_email_patterns,
-    generate_recruiter_email_patterns,
-)
-from app.modules.scrap_client.email_validator import validate_emails_by_domain
 from app.modules.scrap_client.models import ScrapClientJobStatus
 from app.modules.scrap_client.schemas import (
     ScrapClientJobListResponse,
@@ -40,10 +34,17 @@ from app.modules.scrap_client.schemas import (
     ScrapClientStartRequest,
     ScrapClientStatusResponse,
     TestScrapClientRequest,
+    TestScrapClientSiteRequest,
 )
-from app.modules.scrap_client.url_utils import extract_root_domain
-from app.modules.scrap_client.website_crawler import WebsiteCrawler
-from app.modules.scrap_client.website_discovery import (
+from app.modules.scrap_client.services.email_extractor import extract_emails_from_html
+from app.modules.scrap_client.services.email_pattern_generator import (
+    generate_extended_email_patterns,
+    generate_recruiter_email_patterns,
+)
+from app.modules.scrap_client.services.email_validator import validate_emails_by_domain
+from app.modules.scrap_client.services.url_utils import extract_root_domain
+from app.modules.scrap_client.services.website_crawler import WebsiteCrawler
+from app.modules.scrap_client.services.website_discovery import (
     DiscoveryResult,
     discover_company_info,
     get_domain_candidates_for_guessing,
@@ -284,6 +285,112 @@ async def _process_single_client(
     return False, [], website
 
 
+async def _run_client_site_scraper(
+    scrap_client_job_id: int,
+    client_site_id: int,
+    is_test_mode: bool = False,
+) -> None:
+    """
+    Background worker that scrapes client data from a client site URL.
+    Saves extracted clients to CareerClient, using website discovery when email not found.
+    """
+    async def is_stopped() -> bool:
+        """Check if the job has been stopped by the user."""
+        async with async_session() as s:
+            j = await get_scrap_client_job_by_id(s, scrap_client_job_id)
+            return j is not None and j.status == ScrapClientJobStatus.STOPPED.value
+
+    from app.modules.client_site.crud import get_client_site_by_id
+    from app.modules.scrap_client.services.client_data_scraper import scrape_clients_from_url
+
+    async with async_session() as db:
+        try:
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "job_started",
+                progress=0,
+                status="in_progress",
+                details="Background client site scraper started",
+                meta_data={"client_site_id": client_site_id},
+            )
+            client_site = await get_client_site_by_id(db, client_site_id)
+            if client_site is None:
+                await update_scrap_client_job_status(
+                    db, scrap_client_job_id, ScrapClientJobStatus.ERROR
+                )
+                await db.commit()
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    "job_error",
+                    status="error",
+                    details="Client site not found",
+                )
+                return
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "scrap_client_site_start",
+                progress=0,
+                status="in_progress",
+                details=f"Scraping clients from {client_site.name}",
+                meta_data={"client_site_id": client_site_id, "url": client_site.url},
+            )
+            if await is_stopped():
+                return
+            saved_count = await scrape_clients_from_url(
+                db,
+                client_site.url,
+                use_discovery_when_no_email=True,
+                max_pages=5,
+            )
+            if await is_stopped():
+                return
+            await update_scrap_client_job_status(
+                db, scrap_client_job_id, ScrapClientJobStatus.COMPLETED
+            )
+            await update_scrap_client_job_meta_data(
+                db, scrap_client_job_id, {"total": saved_count, "clients_saved": saved_count}
+            )
+            await db.commit()
+            updated = await get_scrap_client_job_by_id(db, scrap_client_job_id)
+            if updated:
+                await broadcast_scrap_client_status(
+                    ScrapClientJobResponse.model_validate(updated).model_dump(),
+                    ScrapClientJobStatus.COMPLETED.value,
+                )
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "job_completed",
+                progress=100,
+                status="completed",
+                details=f"Scraped {saved_count} clients from {client_site.name}",
+                meta_data={
+                    "clients_saved": saved_count,
+                    "total_clients": saved_count,
+                },
+            )
+        except Exception as e:
+            logger.exception("Client site scrap failed: %s", e)
+            try:
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    "job_error",
+                    status="error",
+                    details=str(e),
+                    meta_data={
+                        "clients_saved": 0,
+                        "total_clients": 0,
+                        "error_type": type(e).__name__,
+                    },
+                )
+            except Exception:
+                pass
+            async with async_session() as edb:
+                await update_scrap_client_job_status(
+                    edb, scrap_client_job_id, ScrapClientJobStatus.ERROR
+                )
+                await edb.commit()
+
+
 async def _run_client_email_scraper(
     scrap_client_job_id: int,
     client_ids: list[int] | None,
@@ -292,8 +399,6 @@ async def _run_client_email_scraper(
     is_test_mode: bool = False,
 ) -> None:
     """Background worker that processes clients for email scraping."""
-    logger.info("Background scraper started: job_id=%s", scrap_client_job_id)
-
     try:
         await _create_log_and_broadcast(
             scrap_client_job_id,
@@ -326,7 +431,7 @@ async def _run_client_email_scraper(
             meta = job.meta_data or {}
             job_url = url or meta.get("url")
             if job_url:
-                from app.modules.scrap_client.url_utils import normalize_url
+                from app.modules.scrap_client.services.url_utils import normalize_url
                 website_override = normalize_url(job_url)
             else:
                 website_override = None
@@ -548,8 +653,8 @@ async def start_scrap_client_job(
     request: ScrapClientStartRequest,
 ) -> ScrapClientJobResponse:
     """
-    Create and start a new scrap client job.
-    Fails if client_ids and only_clients_without_emails are both empty/False.
+    Create and start a new scrap client job for email fetching.
+    Requires client_ids or only_clients_without_emails.
     """
     if not request.client_ids and not request.only_clients_without_emails:
         raise BadRequestException(
@@ -570,6 +675,218 @@ async def start_scrap_client_job(
         db,
         {
             "name": f"client_{int(datetime.now(timezone.utc).timestamp())}",
+            "status": ScrapClientJobStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    response = ScrapClientJobResponse.model_validate(scrap_job)
+    await broadcast_scrap_client_status(
+        response.model_dump(), ScrapClientJobStatus.PENDING.value
+    )
+    return response
+
+
+async def _run_client_url_scraper(
+    scrap_client_job_id: int,
+    url: str,
+) -> None:
+    """
+    Background worker that scrapes client data from an arbitrary URL.
+    Saves extracted clients to CareerClient, using website discovery when email not found.
+    """
+    async def is_stopped() -> bool:
+        async with async_session() as s:
+            j = await get_scrap_client_job_by_id(s, scrap_client_job_id)
+            return j is not None and j.status == ScrapClientJobStatus.STOPPED.value
+
+    from app.modules.scrap_client.services.client_data_scraper import scrape_clients_from_url
+    from app.modules.scrap_client.services.url_utils import normalize_url
+
+    normalized_url = normalize_url(url)
+    if not normalized_url:
+        async with async_session() as edb:
+            await update_scrap_client_job_status(
+                edb, scrap_client_job_id, ScrapClientJobStatus.ERROR
+            )
+            await edb.commit()
+        await _create_log_and_broadcast(
+            scrap_client_job_id,
+            "job_error",
+            status="error",
+            details="Invalid URL provided",
+            meta_data={"clients_saved": 0, "total_clients": 0, "url": url},
+        )
+        return
+
+    async with async_session() as db:
+        try:
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "job_started",
+                progress=0,
+                status="in_progress",
+                details="Background URL scraper started",
+                meta_data={"url": normalized_url},
+            )
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "scrap_client_url_start",
+                progress=0,
+                status="in_progress",
+                details=f"Scraping clients from {normalized_url}",
+                meta_data={"url": normalized_url},
+            )
+            if await is_stopped():
+                return
+            saved_count = await scrape_clients_from_url(
+                db,
+                normalized_url,
+                use_discovery_when_no_email=True,
+                max_pages=5,
+            )
+            if await is_stopped():
+                return
+            await update_scrap_client_job_status(
+                db, scrap_client_job_id, ScrapClientJobStatus.COMPLETED
+            )
+            await update_scrap_client_job_meta_data(
+                db, scrap_client_job_id,
+                {"total": saved_count, "clients_saved": saved_count, "url": normalized_url},
+            )
+            await db.commit()
+            updated = await get_scrap_client_job_by_id(db, scrap_client_job_id)
+            if updated:
+                await broadcast_scrap_client_status(
+                    ScrapClientJobResponse.model_validate(updated).model_dump(),
+                    ScrapClientJobStatus.COMPLETED.value,
+                )
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "job_completed",
+                progress=100,
+                status="completed",
+                details=f"Scraped {saved_count} clients from {normalized_url}",
+                meta_data={
+                    "clients_saved": saved_count,
+                    "total_clients": saved_count,
+                    "url": normalized_url,
+                },
+            )
+        except Exception as e:
+            logger.exception("Client URL scrap failed: %s", e)
+            try:
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    "job_error",
+                    status="error",
+                    details=str(e),
+                    meta_data={
+                        "clients_saved": 0,
+                        "total_clients": 0,
+                        "url": normalized_url,
+                        "error_type": type(e).__name__,
+                    },
+                )
+            except Exception:
+                pass
+            async with async_session() as edb:
+                await update_scrap_client_job_status(
+                    edb, scrap_client_job_id, ScrapClientJobStatus.ERROR
+                )
+                await edb.commit()
+
+
+async def start_scrap_client_from_site(
+    db: AsyncSession,
+    client_site_id: int,
+) -> ScrapClientJobResponse:
+    """
+    Create and start a scrap client job that scrapes client data from a client site URL.
+    Extracts companies from the site and saves to CareerClient, using discovery when email not found.
+    """
+    active = await get_active_scrap_client_jobs(db)
+    if active:
+        raise BadRequestException(
+            detail="An active scrap client job already exists"
+        )
+
+    from app.modules.client_site.crud import get_client_site_by_id
+
+    client_site = await get_client_site_by_id(db, client_site_id)
+    if client_site is None:
+        raise NotFoundException(detail="Client site not found")
+
+    meta_data = {"client_site_id": client_site_id}
+    scrap_job = await create_scrap_client_job(
+        db,
+        {
+            "name": f"client_site_{client_site.name}_{int(datetime.now(timezone.utc).timestamp())}",
+            "status": ScrapClientJobStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    response = ScrapClientJobResponse.model_validate(scrap_job)
+    await broadcast_scrap_client_status(
+        response.model_dump(), ScrapClientJobStatus.PENDING.value
+    )
+    return response
+
+
+async def start_scrap_client_from_url(
+    db: AsyncSession,
+    url: str,
+) -> ScrapClientJobResponse:
+    """
+    Create and start a scrap client job that scrapes client data from an arbitrary URL.
+    Extracts companies from the page and saves to CareerClient.
+    """
+    from app.modules.scrap_client.services.url_utils import normalize_url
+
+    active = await get_active_scrap_client_jobs(db)
+    if active:
+        raise BadRequestException(
+            detail="An active scrap client job already exists"
+        )
+
+    normalized_url = normalize_url(url)
+    if not normalized_url:
+        raise BadRequestException(detail="Invalid URL provided")
+
+    meta_data = {"url": normalized_url}
+    scrap_job = await create_scrap_client_job(
+        db,
+        {
+            "name": f"client_url_{int(datetime.now(timezone.utc).timestamp())}",
+            "status": ScrapClientJobStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    response = ScrapClientJobResponse.model_validate(scrap_job)
+    await broadcast_scrap_client_status(
+        response.model_dump(), ScrapClientJobStatus.PENDING.value
+    )
+    return response
+
+
+async def start_test_scrap_client_from_site(
+    db: AsyncSession,
+    request: TestScrapClientSiteRequest,
+) -> ScrapClientJobResponse:
+    """Create and start a test scrap client job from a client site. Does not skip saving."""
+    from app.modules.client_site.crud import get_client_site_by_id
+
+    client_site = await get_client_site_by_id(db, request.client_site_id)
+    if client_site is None:
+        raise NotFoundException(detail="Client site not found")
+
+    meta_data = {
+        "client_site_id": request.client_site_id,
+        "is_test_mode": True,
+    }
+    scrap_job = await create_scrap_client_job(
+        db,
+        {
+            "name": f"test_client_site_{client_site.name}_{int(datetime.now(timezone.utc).timestamp())}",
             "status": ScrapClientJobStatus.PENDING.value,
             "meta_data": meta_data,
         },

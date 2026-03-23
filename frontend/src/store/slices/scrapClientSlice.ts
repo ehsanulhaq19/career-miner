@@ -66,6 +66,32 @@ export const startScrapClientJob = createAsyncThunk(
   }
 );
 
+export const startScrapClientFromSite = createAsyncThunk(
+  "scrapClient/startFromSite",
+  async (client_site_id: number, { rejectWithValue }) => {
+    try {
+      return await scrapClientService.startScrapClientFromSite(client_site_id);
+    } catch (error: any) {
+      return rejectWithValue(
+        error.response?.data?.detail || "Failed to start scrap from client site"
+      );
+    }
+  }
+);
+
+export const startScrapClientFromUrl = createAsyncThunk(
+  "scrapClient/startFromUrl",
+  async (url: string, { rejectWithValue }) => {
+    try {
+      return await scrapClientService.startScrapClientFromUrl(url);
+    } catch (error: any) {
+      return rejectWithValue(
+        error.response?.data?.detail || "Failed to start scrap from URL"
+      );
+    }
+  }
+);
+
 export const testScrapClientJob = createAsyncThunk(
   "scrapClient/test",
   async (
@@ -190,6 +216,24 @@ const scrapClientSlice = createSlice({
         state.error = action.payload as string;
       })
       .addCase(startScrapClientJob.fulfilled, (state, action) => {
+        const exists = state.items.some(
+          (item) => item.id === action.payload.id
+        );
+        if (!exists) {
+          state.items.unshift(action.payload);
+          state.total += 1;
+        }
+      })
+      .addCase(startScrapClientFromSite.fulfilled, (state, action) => {
+        const exists = state.items.some(
+          (item) => item.id === action.payload.id
+        );
+        if (!exists) {
+          state.items.unshift(action.payload);
+          state.total += 1;
+        }
+      })
+      .addCase(startScrapClientFromUrl.fulfilled, (state, action) => {
         const exists = state.items.some(
           (item) => item.id === action.payload.id
         );

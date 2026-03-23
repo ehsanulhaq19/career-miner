@@ -4,10 +4,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ScrapClientStartRequest(BaseModel):
-    """Schema for starting a new scrap client job."""
+    """Schema for starting a new scrap client job for email fetching."""
 
     client_ids: list[int] | None = None
     only_clients_without_emails: bool = False
+
+
+class ScrapClientSiteStartRequest(BaseModel):
+    """Schema for starting a scrap client job from a client site URL."""
+
+    client_site_id: int
+
+
+class ScrapClientUrlStartRequest(BaseModel):
+    """Schema for starting a scrap client job from an arbitrary URL."""
+
+    url: str
 
 
 class TestScrapClientRequest(BaseModel):
@@ -16,6 +28,12 @@ class TestScrapClientRequest(BaseModel):
     client_ids: list[int] = []
     only_clients_without_emails: bool = False
     url: str | None = None
+
+
+class TestScrapClientSiteRequest(BaseModel):
+    """Schema for executing a test scrap client job from a client site."""
+
+    client_site_id: int
 
 
 class ScrapClientJobResponse(BaseModel):

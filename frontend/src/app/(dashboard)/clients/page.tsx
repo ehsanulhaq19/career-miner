@@ -10,7 +10,7 @@ import {
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchCareerClients,
-  setHasEmailInformation,
+  setHasEmailFilter,
   setPage,
 } from "@/store/slices/careerClientSlice";
 import { CareerClient } from "@/types";
@@ -19,12 +19,18 @@ import BulkEditModal from "@/components/BulkEditModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
-  const { items, total, page, limit, hasEmailInformation, loading } =
+  const { items, total, page, limit, hasEmailFilter, loading } =
     useAppSelector((state) => state.careerClient);
   const [selectedClient, setSelectedClient] = useState<CareerClient | null>(
     null
   );
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  const getHasEmailParam = () => {
+    if (hasEmailFilter === "with") return true;
+    if (hasEmailFilter === "without") return false;
+    return undefined;
+  };
 
   const refetch = () => {
     const skip = (page - 1) * limit;
@@ -32,7 +38,7 @@ export default function ClientsPage() {
       fetchCareerClients({
         skip,
         limit,
-        hasEmailInformation: hasEmailInformation || undefined,
+        hasEmailInformation: getHasEmailParam(),
       })
     );
   };
@@ -43,10 +49,10 @@ export default function ClientsPage() {
       fetchCareerClients({
         skip,
         limit,
-        hasEmailInformation: hasEmailInformation || undefined,
+        hasEmailInformation: getHasEmailParam(),
       })
     );
-  }, [dispatch, page, limit, hasEmailInformation]);
+  }, [dispatch, page, limit, hasEmailFilter]);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -69,17 +75,19 @@ export default function ClientsPage() {
             <HiOutlinePencilSquare className="w-4 h-4" />
             Bulk Edit
           </button>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={hasEmailInformation}
-              onChange={(e) => handleHasEmailFilterChange(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
-            />
-            <span className="text-sm text-gray-700 dark:text-gray-300">
-              With emails only
-            </span>
-          </label>
+          <select
+            value={hasEmailFilter}
+            onChange={(e) =>
+              handleHasEmailFilterChange(
+                e.target.value as "all" | "with" | "without"
+              )
+            }
+            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+          >
+            <option value="all">All clients</option>
+            <option value="with">With emails</option>
+            <option value="without">Without emails</option>
+          </select>
         </div>
       </div>
 

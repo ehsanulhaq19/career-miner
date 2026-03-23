@@ -3,6 +3,7 @@ import { useDispatch, useSelector, TypedUseSelectorHook } from "react-redux";
 import authReducer from "./slices/authSlice";
 import themeReducer from "./slices/themeSlice";
 import jobSiteReducer from "./slices/jobSiteSlice";
+import clientSiteReducer from "./slices/clientSiteSlice";
 import careerJobReducer from "./slices/careerJobSlice";
 import careerClientReducer from "./slices/careerClientSlice";
 import dashboardReducer from "./slices/dashboardSlice";
@@ -17,6 +18,7 @@ export const store = configureStore({
     auth: authReducer,
     theme: themeReducer,
     jobSite: jobSiteReducer,
+    clientSite: clientSiteReducer,
     careerJob: careerJobReducer,
     careerClient: careerClientReducer,
     dashboard: dashboardReducer,

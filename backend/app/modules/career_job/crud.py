@@ -400,7 +400,9 @@ async def get_dashboard_stats(db: AsyncSession) -> dict:
     site_count_result = await db.execute(select(func.count(JobSite.id)))
     total_job_sites = site_count_result.scalar() or 0
 
-    client_count_result = await db.execute(select(func.count(CareerClient.id)))
+    client_count_result = await db.execute(
+        select(func.count(CareerClient.id)).where(CareerClient.is_active == True)
+    )
     total_clients = client_count_result.scalar() or 0
 
     total_job_email_logs = await get_job_email_logs_count(db)
