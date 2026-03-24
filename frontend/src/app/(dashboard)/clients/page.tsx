@@ -7,6 +7,7 @@ import {
   HiOutlineMagnifyingGlassCircle,
   HiOutlinePencilSquare,
   HiOutlineUserGroup,
+  HiOutlineTrash,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
@@ -18,6 +19,7 @@ import { CareerClient } from "@/types";
 import ClientDetailModal from "@/components/ClientDetailModal";
 import BulkEditModal from "@/components/BulkEditModal";
 import ScanClientsModal from "@/components/ScanClientsModal";
+import CleanEmailsModal from "@/components/CleanEmailsModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
@@ -28,6 +30,7 @@ export default function ClientsPage() {
   );
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [scanModalOpen, setScanModalOpen] = useState(false);
+  const [cleanEmailsOpen, setCleanEmailsOpen] = useState(false);
 
   const getHasEmailParam = () => {
     if (hasEmailFilter === "with") return true;
@@ -79,6 +82,13 @@ export default function ClientsPage() {
           >
             <HiOutlineMagnifyingGlassCircle className="w-4 h-4" />
             Scan Clients
+          </button>
+          <button
+            onClick={() => setCleanEmailsOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlineTrash className="w-4 h-4" />
+            Clean Emails
           </button>
           <button
             onClick={() => setBulkEditOpen(true)}
@@ -177,6 +187,11 @@ export default function ClientsPage() {
       <ScanClientsModal
         isOpen={scanModalOpen}
         onClose={() => setScanModalOpen(false)}
+        onUpdated={refetch}
+      />
+      <CleanEmailsModal
+        isOpen={cleanEmailsOpen}
+        onClose={() => setCleanEmailsOpen(false)}
         onUpdated={refetch}
       />
     </div>

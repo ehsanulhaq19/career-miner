@@ -19,6 +19,24 @@ def _apply_has_email_filter(query, has_email_information: bool | None):
     )
 
 
+async def get_career_clients_by_ids_or_all(
+    db: AsyncSession,
+    client_ids: list[int] | None = None,
+    all_clients: bool = False,
+) -> list[CareerClient]:
+    """
+    Retrieve career clients by ids or all active clients.
+    When client_ids provided, returns only those active clients. When all_clients
+    True and no client_ids, returns all active clients.
+    """
+    query = select(CareerClient).where(CareerClient.is_active.is_(True))
+    if client_ids:
+        query = query.where(CareerClient.id.in_(client_ids))
+    query = query.order_by(CareerClient.id.desc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
 async def get_career_clients(
     db: AsyncSession,
     skip: int = 0,

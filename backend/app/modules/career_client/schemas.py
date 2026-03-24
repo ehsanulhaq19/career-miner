@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 
 class CareerClientUpdate(BaseModel):
@@ -71,3 +71,39 @@ class CareerClientScanResponse(BaseModel):
     """Schema for career client scan result."""
 
     deactivated_count: int
+
+
+class ValidateEmailsRequest(BaseModel):
+    """Schema for validating client emails request."""
+
+    client_ids: list[int] | None = None
+    all_clients: bool = False
+
+    @model_validator(mode="after")
+    def validate_params(self):
+        if self.all_clients:
+            return self
+        if not self.client_ids or len(self.client_ids) == 0:
+            raise ValueError("Either client_ids or all_clients=true required")
+        return self
+
+
+class ClientInvalidEmailsItem(BaseModel):
+    """Schema for a client with its invalid emails."""
+
+    client_id: int
+    client_name: str
+    invalid_emails: list[str]
+
+
+class RemoveInvalidEmailsItem(BaseModel):
+    """Schema for single client invalid emails removal."""
+
+    client_id: int
+    invalid_emails: list[str]
+
+
+class RemoveInvalidEmailsRequest(BaseModel):
+    """Schema for removing invalid emails from clients."""
+
+    clients: list[RemoveInvalidEmailsItem]

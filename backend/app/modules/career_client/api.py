@@ -10,15 +10,20 @@ from app.modules.career_client.schemas import (
     CareerClientLocationsResponse,
     CareerClientResponse,
     CareerClientScanCriteria,
+    ClientInvalidEmailsItem,
     CareerClientUpdate,
+    RemoveInvalidEmailsRequest,
+    ValidateEmailsRequest,
 )
 from app.modules.career_client.service import (
     bulk_update_career_clients,
     get_career_client_by_id,
     get_career_client_locations,
     list_career_clients,
+    remove_invalid_emails,
     scan_career_clients,
     update_career_client,
+    validate_client_emails,
 )
 
 router = APIRouter()
@@ -110,3 +115,29 @@ async def scan_career_clients_endpoint(
         )
     result = await scan_career_clients(db, criteria)
     return {"deactivated_count": result.deactivated_count}
+
+
+@router.post("/validate-emails", response_model=list[ClientInvalidEmailsItem])
+async def validate_client_emails_endpoint(
+    request: ValidateEmailsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[ClientInvalidEmailsItem]:
+    """
+    Validate client emails. Accept client_ids or all_clients=true.
+    Returns only clients that have invalid emails.
+    """
+    return await validate_client_emails(db, request)
+
+
+@router.post("/remove-invalid-emails")
+async def remove_invalid_emails_endpoint(
+    request: RemoveInvalidEmailsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Remove specified invalid emails from clients.
+    """
+    count = await remove_invalid_emails(db, request.clients)
+    return {"updated_count": count}

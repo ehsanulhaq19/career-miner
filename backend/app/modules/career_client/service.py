@@ -4,6 +4,7 @@ from app.modules.career_client.crud import (
     bulk_update_career_clients_by_location as crud_bulk_update,
     get_career_client_by_id as crud_get_career_client_by_id,
     get_career_clients,
+    get_career_clients_by_ids_or_all as crud_get_by_ids_or_all,
     get_distinct_career_client_locations as crud_get_locations,
     scan_and_deactivate_career_clients as crud_scan_and_deactivate,
     get_total_career_clients_count,
@@ -17,6 +18,9 @@ from app.modules.career_client.schemas import (
     CareerClientScanCriteria,
     CareerClientScanResponse,
     CareerClientUpdate,
+    ClientInvalidEmailsItem,
+    RemoveInvalidEmailsItem,
+    ValidateEmailsRequest,
 )
 
 
@@ -83,6 +87,69 @@ async def get_career_client_locations(
     """Return all distinct locations from career clients."""
     locations = await crud_get_locations(db)
     return CareerClientLocationsResponse(locations=locations)
+
+
+async def validate_client_emails(
+    db: AsyncSession, request: ValidateEmailsRequest
+) -> list[ClientInvalidEmailsItem]:
+    """
+    Validate emails for specified clients. Returns only clients that have
+    invalid emails with their invalid email addresses.
+    """
+    from app.modules.scrap_client.services.email_validator import (
+        validate_emails_by_domain,
+    )
+
+    clients = await crud_get_by_ids_or_all(
+        db,
+        client_ids=request.client_ids,
+        all_clients=request.all_clients,
+    )
+    result: list[ClientInvalidEmailsItem] = []
+    for client in clients:
+        emails = client.emails or []
+        if not emails:
+            continue
+        valid_emails = await validate_emails_by_domain(emails)
+        valid_set = {e.lower().strip() for e in valid_emails}
+        invalid = [
+            e for e in emails
+            if not e or (e.lower().strip() not in valid_set)
+        ]
+        if invalid:
+            result.append(
+                ClientInvalidEmailsItem(
+                    client_id=client.id,
+                    client_name=client.name or "Unnamed",
+                    invalid_emails=invalid,
+                )
+            )
+    return result
+
+
+async def remove_invalid_emails(
+    db: AsyncSession, items: list[RemoveInvalidEmailsItem]
+) -> int:
+    """
+    Remove specified invalid emails from clients. Returns count of updated clients.
+    """
+    updated_count = 0
+    for item in items:
+        client = await crud_get_career_client_by_id(db, item.client_id)
+        if client is None:
+            continue
+        current = list(client.emails or [])
+        to_remove = {e.lower().strip() for e in item.invalid_emails if e}
+        new_emails = [
+            e for e in current
+            if e and e.lower().strip() not in to_remove
+        ]
+        if len(new_emails) != len(current):
+            await crud_update_career_client(
+                db, item.client_id, {"emails": new_emails}
+            )
+            updated_count += 1
+    return updated_count
 
 
 async def scan_career_clients(

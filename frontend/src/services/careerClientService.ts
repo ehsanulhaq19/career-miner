@@ -74,4 +74,23 @@ export const careerClientService = {
     );
     return data;
   },
+  async validateClientEmails(params: {
+    client_ids?: number[];
+    all_clients?: boolean;
+  }) {
+    const { data } = await api.post<
+      { client_id: number; client_name: string; invalid_emails: string[] }[]
+    >("/career-clients/validate-emails", params);
+    return data;
+  },
+  async removeInvalidEmails(clients: {
+    client_id: number;
+    invalid_emails: string[];
+  }[]) {
+    const { data } = await api.post<{ updated_count: number }>(
+      "/career-clients/remove-invalid-emails",
+      { clients }
+    );
+    return data;
+  },
 };
