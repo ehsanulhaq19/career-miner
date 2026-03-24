@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.crud import (
@@ -89,8 +91,13 @@ async def get_career_client_locations(
     return CareerClientLocationsResponse(locations=locations)
 
 
-async def validate_client_emails(
-    db: AsyncSession, request: ValidateEmailsRequest
+ProgressCallback = Callable[[int, int, int, str], Awaitable[None]] | None
+
+
+async def _validate_client_emails_core(
+    db: AsyncSession,
+    request: ValidateEmailsRequest,
+    on_progress: ProgressCallback = None,
 ) -> list[ClientInvalidEmailsItem]:
     """
     Validate emails for specified clients. Returns only clients that have
@@ -105,11 +112,18 @@ async def validate_client_emails(
         client_ids=request.client_ids,
         all_clients=request.all_clients,
     )
+    clients_with_emails = [c for c in clients if c.emails]
+    total = len(clients_with_emails)
     result: list[ClientInvalidEmailsItem] = []
-    for client in clients:
+    for idx, client in enumerate(clients_with_emails, start=1):
+        if on_progress is not None:
+            await on_progress(
+                idx,
+                total,
+                client.id,
+                client.name or "Unnamed",
+            )
         emails = client.emails or []
-        if not emails:
-            continue
         valid_emails = await validate_emails_by_domain(emails)
         valid_set = {e.lower().strip() for e in valid_emails}
         invalid = [
@@ -125,6 +139,66 @@ async def validate_client_emails(
                 )
             )
     return result
+
+
+async def validate_client_emails(
+    db: AsyncSession, request: ValidateEmailsRequest
+) -> list[ClientInvalidEmailsItem]:
+    """Validate client emails (synchronous within request; no progress)."""
+    return await _validate_client_emails_core(db, request)
+
+
+async def run_validate_client_emails_background(
+    user_id: int,
+    request: ValidateEmailsRequest,
+) -> None:
+    """
+    Run validation in a dedicated session; broadcast progress and result
+    to the user's WebSocket channel.
+    """
+    from app.database import async_session
+    from app.modules.websocket.service import (
+        broadcast_client_email_validation_completed,
+        broadcast_client_email_validation_error,
+        broadcast_client_email_validation_progress,
+    )
+
+    async def on_progress(
+        current: int,
+        total: int,
+        client_id: int,
+        client_name: str,
+    ) -> None:
+        await broadcast_client_email_validation_progress(
+            user_id,
+            {
+                "current": current,
+                "total": total,
+                "client_id": client_id,
+                "client_name": client_name,
+            },
+        )
+
+    async with async_session() as db:
+        try:
+            result = await _validate_client_emails_core(
+                db, request, on_progress=on_progress
+            )
+            await db.commit()
+            await broadcast_client_email_validation_completed(
+                user_id,
+                {
+                    "invalid_clients": [
+                        item.model_dump(mode="json") for item in result
+                    ],
+                },
+            )
+        except Exception as e:
+            await db.rollback()
+            await broadcast_client_email_validation_error(
+                user_id, {"message": str(e)}
+            )
+            raise
 
 
 async def remove_invalid_emails(

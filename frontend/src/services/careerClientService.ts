@@ -78,9 +78,10 @@ export const careerClientService = {
     client_ids?: number[];
     all_clients?: boolean;
   }) {
-    const { data } = await api.post<
-      { client_id: number; client_name: string; invalid_emails: string[] }[]
-    >("/career-clients/validate-emails", params);
+    const { data } = await api.post<{ status: string }>(
+      "/career-clients/validate-emails",
+      params
+    );
     return data;
   },
   async removeInvalidEmails(clients: {

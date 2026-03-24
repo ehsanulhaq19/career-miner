@@ -107,3 +107,9 @@ class RemoveInvalidEmailsRequest(BaseModel):
     """Schema for removing invalid emails from clients."""
 
     clients: list[RemoveInvalidEmailsItem]
+
+
+class ValidateEmailsStartedResponse(BaseModel):
+    """Response when email validation is started in the background."""
+
+    status: str = "started"

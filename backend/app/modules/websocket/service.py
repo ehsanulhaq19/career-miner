@@ -3,6 +3,9 @@
 from app.modules.websocket.constants.socket_message_types import (
     BULK_JOB_APPLICATION_EMAIL_SEND_LOG,
     BULK_JOB_APPLICATION_LOG,
+    CLIENT_EMAIL_VALIDATION_COMPLETED,
+    CLIENT_EMAIL_VALIDATION_ERROR,
+    CLIENT_EMAIL_VALIDATION_PROGRESS,
     SCRAP_CLIENT_COMPLETED,
     SCRAP_CLIENT_ERROR,
     SCRAP_CLIENT_IN_PROGRESS,
@@ -26,6 +29,7 @@ BULK_JOB_APPLICATION_CHANNEL_PREFIX = "/ws/bulk_job_application/"
 BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX = (
     "/ws/bulk_job_application_email/"
 )
+CLIENT_EMAIL_VALIDATION_CHANNEL_PREFIX = "/ws/client_email_validation/"
 
 
 def _scrap_job_log_data(log: dict) -> dict:
@@ -201,6 +205,39 @@ async def broadcast_bulk_job_application_email_send_log(
     channel = f"{BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX}{user_id}"
     await connection_manager.send_to_channel(
         channel, BULK_JOB_APPLICATION_EMAIL_SEND_LOG, data
+    )
+
+
+async def broadcast_client_email_validation_progress(
+    user_id: int,
+    data: dict,
+) -> None:
+    """Broadcast validate-emails progress to the user's channel."""
+    channel = f"{CLIENT_EMAIL_VALIDATION_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.send_to_channel(
+        channel, CLIENT_EMAIL_VALIDATION_PROGRESS, data
+    )
+
+
+async def broadcast_client_email_validation_completed(
+    user_id: int,
+    data: dict,
+) -> None:
+    """Broadcast validate-emails completion with result list."""
+    channel = f"{CLIENT_EMAIL_VALIDATION_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.send_to_channel(
+        channel, CLIENT_EMAIL_VALIDATION_COMPLETED, data
+    )
+
+
+async def broadcast_client_email_validation_error(
+    user_id: int,
+    data: dict,
+) -> None:
+    """Broadcast validate-emails failure."""
+    channel = f"{CLIENT_EMAIL_VALIDATION_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.send_to_channel(
+        channel, CLIENT_EMAIL_VALIDATION_ERROR, data
     )
 
 

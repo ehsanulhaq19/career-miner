@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -10,10 +10,10 @@ from app.modules.career_client.schemas import (
     CareerClientLocationsResponse,
     CareerClientResponse,
     CareerClientScanCriteria,
-    ClientInvalidEmailsItem,
     CareerClientUpdate,
     RemoveInvalidEmailsRequest,
     ValidateEmailsRequest,
+    ValidateEmailsStartedResponse,
 )
 from app.modules.career_client.service import (
     bulk_update_career_clients,
@@ -23,10 +23,19 @@ from app.modules.career_client.service import (
     remove_invalid_emails,
     scan_career_clients,
     update_career_client,
-    validate_client_emails,
+    run_validate_client_emails_background,
 )
 
 router = APIRouter()
+
+
+async def _validate_client_emails_background_task(
+    user_id: int,
+    body: dict,
+) -> None:
+    """Run email validation with a fresh DB session; progress via WebSocket."""
+    req = ValidateEmailsRequest.model_validate(body)
+    await run_validate_client_emails_background(user_id, req)
 
 
 @router.get("/", response_model=CareerClientListResponse)
@@ -117,17 +126,22 @@ async def scan_career_clients_endpoint(
     return {"deactivated_count": result.deactivated_count}
 
 
-@router.post("/validate-emails", response_model=list[ClientInvalidEmailsItem])
+@router.post("/validate-emails", response_model=ValidateEmailsStartedResponse)
 async def validate_client_emails_endpoint(
     request: ValidateEmailsRequest,
-    db: AsyncSession = Depends(get_db),
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-) -> list[ClientInvalidEmailsItem]:
+) -> ValidateEmailsStartedResponse:
     """
-    Validate client emails. Accept client_ids or all_clients=true.
-    Returns only clients that have invalid emails.
+    Validate client emails in the background. Accept client_ids or all_clients=true.
+    Progress and final results are sent on the client_email_validation WebSocket.
     """
-    return await validate_client_emails(db, request)
+    background_tasks.add_task(
+        _validate_client_emails_background_task,
+        current_user.id,
+        request.model_dump(),
+    )
+    return ValidateEmailsStartedResponse()
 
 
 @router.post("/remove-invalid-emails")

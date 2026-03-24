@@ -13,6 +13,11 @@ import {
   addScrapClientLogFromSocket,
 } from "@/store/slices/scrapClientSlice";
 import {
+  clientEmailValidationCompletedFromSocket,
+  clientEmailValidationErrorFromSocket,
+  clientEmailValidationProgressFromSocket,
+} from "@/store/slices/clientEmailValidationSlice";
+import {
   BULK_JOB_APPLICATION_LOG,
   BULK_JOB_APPLICATION_EMAIL_SEND_LOG,
   SCRAP_JOB_PENDING,
@@ -29,6 +34,9 @@ import {
   SCRAP_CLIENT_TERMINATED,
   SCRAP_CLIENT_STOPPED,
   SCRAP_CLIENT_LOG,
+  CLIENT_EMAIL_VALIDATION_PROGRESS,
+  CLIENT_EMAIL_VALIDATION_COMPLETED,
+  CLIENT_EMAIL_VALIDATION_ERROR,
 } from "@/constants/socketMessageTypes";
 import Cookies from "js-cookie";
 
@@ -80,6 +88,13 @@ function getBulkEmailSendWebSocketUrl(userId: number): string {
   return `${wsBase}/ws/bulk_job_application_email/${userId}?token=${encodeURIComponent(token || "")}`;
 }
 
+function getClientEmailValidationWebSocketUrl(userId: number): string {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+  const wsBase = baseUrl.replace(/^http/, "ws").replace("/api", "");
+  const token = Cookies.get("token");
+  return `${wsBase}/ws/client_email_validation/${userId}?token=${encodeURIComponent(token || "")}`;
+}
+
 export default function WebSocketProvider({
   children,
 }: {
@@ -91,14 +106,17 @@ export default function WebSocketProvider({
   const scrapClientWsRef = useRef<WebSocket | null>(null);
   const bulkJobApplicationWsRef = useRef<WebSocket | null>(null);
   const bulkEmailSendWsRef = useRef<WebSocket | null>(null);
+  const clientEmailValidationWsRef = useRef<WebSocket | null>(null);
   const scrapJobReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapClientReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const bulkJobApplicationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const bulkEmailSendReconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const clientEmailValidationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapJobAttemptsRef = useRef(0);
   const scrapClientAttemptsRef = useRef(0);
   const bulkJobApplicationAttemptsRef = useRef(0);
   const bulkEmailSendAttemptsRef = useRef(0);
+  const clientEmailValidationAttemptsRef = useRef(0);
 
   useEffect(() => {
     if (!user?.id || !token) return;
@@ -296,10 +314,66 @@ export default function WebSocketProvider({
       };
     };
 
+    const connectClientEmailValidation = () => {
+      const ws = new WebSocket(getClientEmailValidationWebSocketUrl(user.id));
+      clientEmailValidationWsRef.current = ws;
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const { type, data } = message;
+          if (!type || !data) return;
+          if (type === CLIENT_EMAIL_VALIDATION_PROGRESS) {
+            dispatch(
+              clientEmailValidationProgressFromSocket({
+                current: data.current,
+                total: data.total,
+                client_id: data.client_id,
+                client_name: data.client_name,
+              })
+            );
+            return;
+          }
+          if (type === CLIENT_EMAIL_VALIDATION_COMPLETED) {
+            dispatch(
+              clientEmailValidationCompletedFromSocket({
+                invalid_clients: data.invalid_clients ?? [],
+              })
+            );
+            return;
+          }
+          if (type === CLIENT_EMAIL_VALIDATION_ERROR) {
+            dispatch(
+              clientEmailValidationErrorFromSocket({
+                message: data.message ?? "Validation failed",
+              })
+            );
+          }
+        } catch {
+          return;
+        }
+      };
+      ws.onclose = () => {
+        clientEmailValidationWsRef.current = null;
+        const delay = Math.min(
+          1000 * 2 ** clientEmailValidationAttemptsRef.current,
+          30000
+        );
+        clientEmailValidationAttemptsRef.current += 1;
+        clientEmailValidationReconnectRef.current = setTimeout(
+          connectClientEmailValidation,
+          delay
+        );
+      };
+      ws.onopen = () => {
+        clientEmailValidationAttemptsRef.current = 0;
+      };
+    };
+
     connectScrapJob();
     connectScrapClient();
     connectBulkJobApplication();
     connectBulkEmailSend();
+    connectClientEmailValidation();
 
     return () => {
       if (scrapJobReconnectRef.current) {
@@ -313,6 +387,9 @@ export default function WebSocketProvider({
       }
       if (bulkEmailSendReconnectRef.current) {
         clearTimeout(bulkEmailSendReconnectRef.current);
+      }
+      if (clientEmailValidationReconnectRef.current) {
+        clearTimeout(clientEmailValidationReconnectRef.current);
       }
       if (bulkJobApplicationWsRef.current) {
         bulkJobApplicationWsRef.current.close();
@@ -329,6 +406,10 @@ export default function WebSocketProvider({
       if (scrapClientWsRef.current) {
         scrapClientWsRef.current.close();
         scrapClientWsRef.current = null;
+      }
+      if (clientEmailValidationWsRef.current) {
+        clientEmailValidationWsRef.current.close();
+        clientEmailValidationWsRef.current = null;
       }
     };
   }, [user?.id, token, dispatch]);

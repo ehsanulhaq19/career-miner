@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 import { HiChevronLeft, HiChevronRight, HiXMark } from "react-icons/hi2";
 import { careerClientService } from "@/services/careerClientService";
 import { CareerClient } from "@/types";
+import { useAppDispatch, useAppSelector } from "@/store/store";
+import {
+  clientEmailValidationHttpError,
+  resetClientEmailValidation,
+  startClientEmailValidation,
+} from "@/store/slices/clientEmailValidationSlice";
 
 interface CleanEmailsModalProps {
   isOpen: boolean;
@@ -11,17 +17,13 @@ interface CleanEmailsModalProps {
   onUpdated?: () => void;
 }
 
-interface ValidationResult {
-  client_id: number;
-  client_name: string;
-  invalid_emails: string[];
-}
-
 export default function CleanEmailsModal({
   isOpen,
   onClose,
   onUpdated,
 }: CleanEmailsModalProps) {
+  const dispatch = useAppDispatch();
+  const emailValidation = useAppSelector((s) => s.clientEmailValidation);
   const [clients, setClients] = useState<CareerClient[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -29,15 +31,20 @@ export default function CleanEmailsModal({
   const [loading, setLoading] = useState(false);
   const [selectAll, setSelectAll] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [validating, setValidating] = useState(false);
-  const [results, setResults] = useState<ValidationResult[] | null>(null);
   const [confirming, setConfirming] = useState(false);
+
+  const results = emailValidation.results;
+  const showResultsView = emailValidation.status === "completed";
+  const validating = emailValidation.status === "running";
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (results) setResults(null);
-        else onClose();
+        if (showResultsView) dispatch(resetClientEmailValidation());
+        else {
+          dispatch(resetClientEmailValidation());
+          onClose();
+        }
       }
     };
     if (isOpen) {
@@ -48,13 +55,13 @@ export default function CleanEmailsModal({
       document.removeEventListener("keydown", handleEsc);
       document.body.style.overflow = "";
     };
-  }, [isOpen, onClose, results]);
+  }, [isOpen, onClose, showResultsView, dispatch]);
 
   useEffect(() => {
     if (!isOpen) return;
     setPage(1);
-    setResults(null);
-  }, [isOpen]);
+    dispatch(resetClientEmailValidation());
+  }, [isOpen, dispatch]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -89,16 +96,17 @@ export default function CleanEmailsModal({
   };
 
   const handleValidate = async () => {
-    setValidating(true);
+    dispatch(startClientEmailValidation());
     try {
       const payload =
         selectAll
           ? { all_clients: true }
           : { client_ids: Array.from(selectedIds) };
-      const data = await careerClientService.validateClientEmails(payload);
-      setResults(data ?? []);
-    } finally {
-      setValidating(false);
+      await careerClientService.validateClientEmails(payload);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to start email validation.";
+      dispatch(clientEmailValidationHttpError({ message: msg }));
     }
   };
 
@@ -119,16 +127,21 @@ export default function CleanEmailsModal({
   };
 
   const handleBackFromResults = () => {
-    setResults(null);
+    dispatch(resetClientEmailValidation());
+  };
+
+  const handleClose = () => {
+    dispatch(resetClientEmailValidation());
+    onClose();
   };
 
   if (!isOpen) return null;
 
-  if (results !== null) {
+  if (showResultsView && results != null) {
     return (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        onClick={results.length === 0 ? onClose : undefined}
+        onClick={results.length === 0 ? handleClose : undefined}
       >
         <div className="fixed inset-0 bg-black/50" />
         <div
@@ -140,7 +153,7 @@ export default function CleanEmailsModal({
               Invalid Emails Found
             </h2>
             <button
-              onClick={results.length === 0 ? onClose : handleBackFromResults}
+              onClick={results.length === 0 ? handleClose : handleBackFromResults}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               <HiXMark className="w-5 h-5" />
@@ -193,7 +206,7 @@ export default function CleanEmailsModal({
               </>
             )}
           </div>
-          {results.length > 0 && (
+          {results.length > 0 ? (
             <div className="p-6 pt-0 flex justify-end gap-2 flex-shrink-0">
               <button
                 type="button"
@@ -211,16 +224,32 @@ export default function CleanEmailsModal({
                 {confirming ? "Removing..." : "Confirm Remove"}
               </button>
             </div>
+          ) : (
+            <div className="p-6 pt-0 flex justify-end flex-shrink-0">
+              <button
+                type="button"
+                onClick={handleBackFromResults}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Back
+              </button>
+            </div>
           )}
         </div>
       </div>
     );
   }
 
+  const progress = emailValidation.progress;
+  const pct =
+    progress && progress.total > 0
+      ? Math.round((progress.current / progress.total) * 100)
+      : 0;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div className="fixed inset-0 bg-black/50" />
       <div
@@ -232,19 +261,47 @@ export default function CleanEmailsModal({
             Clean Emails
           </h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
           >
             <HiXMark className="w-5 h-5" />
           </button>
         </div>
         <div className="p-6 overflow-auto flex-1">
+          {emailValidation.status === "error" && emailValidation.error && (
+            <div className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+              {emailValidation.error}
+            </div>
+          )}
+          {validating && (
+            <div className="mb-4 rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50/80 dark:bg-primary-900/20 px-4 py-3">
+              <p className="text-sm font-medium text-gray-900 dark:text-white mb-2">
+                {progress
+                  ? `Validating ${progress.client_name}…`
+                  : "Starting validation…"}
+              </p>
+              {progress && progress.total > 0 && (
+                <>
+                  <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div
+                      className="h-full bg-primary-600 transition-all duration-300 rounded-full"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                    {progress.current} / {progress.total} clients
+                  </p>
+                </>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 mb-4">
             <input
               type="checkbox"
               id="select_all_clean"
               checked={selectAll}
               onChange={toggleSelectAll}
+              disabled={validating}
               className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
             />
             <label
@@ -263,6 +320,7 @@ export default function CleanEmailsModal({
                       type="checkbox"
                       checked={selectAll}
                       onChange={toggleSelectAll}
+                      disabled={validating}
                       className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
                     />
                   </th>
@@ -295,7 +353,7 @@ export default function CleanEmailsModal({
                     <tr
                       key={c.id}
                       className={`bg-white dark:bg-gray-900 ${
-                        selectAll ? "opacity-60" : ""
+                        selectAll || validating ? "opacity-60" : ""
                       }`}
                     >
                       <td className="px-4 py-3">
@@ -303,7 +361,7 @@ export default function CleanEmailsModal({
                           type="checkbox"
                           checked={selectAll || selectedIds.has(c.id)}
                           onChange={() => toggleClient(c.id)}
-                          disabled={selectAll}
+                          disabled={selectAll || validating}
                           className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed"
                         />
                       </td>
@@ -351,7 +409,7 @@ export default function CleanEmailsModal({
         <div className="p-6 pt-0 flex justify-end gap-2 flex-shrink-0">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
           >
             Cancel
