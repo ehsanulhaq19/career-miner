@@ -41,7 +41,9 @@ from app.modules.scrap_client.services.email_pattern_generator import (
     generate_extended_email_patterns,
     generate_recruiter_email_patterns,
 )
-from app.modules.scrap_client.services.email_validator import validate_emails_by_domain
+from app.modules.scrap_client.services.email_validator import (
+    validate_scraped_emails_for_storage,
+)
 from app.modules.scrap_client.services.url_utils import extract_root_domain
 from app.modules.scrap_client.services.website_crawler import WebsiteCrawler
 from app.modules.scrap_client.services.website_discovery import (
@@ -101,6 +103,7 @@ async def _process_single_client(
     """
     Process a single client: discover website and contact info, crawl, extract/generate emails, validate.
     Uses multi-strategy discovery with Grok AI as primary, followed by direct guess and DuckDuckGo.
+    All persisted emails pass validate_scraped_emails_for_storage (format, disposable, MX, SMTP).
     Returns (success, validated_emails, official_website).
     """
 
@@ -220,11 +223,11 @@ async def _process_single_client(
         candidate_list = list(all_emails)
         await log_step(
             "email_validation_start",
-            f"Validating {len(candidate_list)} email candidates via MX records",
+            f"Validating {len(candidate_list)} email candidates (format, disposable, MX, SMTP)",
             {"candidate_count": len(candidate_list)},
         )
 
-        validated = await validate_emails_by_domain(candidate_list)
+        validated = await validate_scraped_emails_for_storage(candidate_list)
 
         await log_step(
             "email_validation_complete",
@@ -258,7 +261,7 @@ async def _process_single_client(
                 root = extract_root_domain(verified_website)
                 if root:
                     extended = generate_extended_email_patterns(root)
-                    validated = await validate_emails_by_domain(extended)
+                    validated = await validate_scraped_emails_for_storage(extended)
                     if validated:
                         await log_step(
                             "domain_guess_success",
@@ -398,7 +401,11 @@ async def _run_client_email_scraper(
     url: str | None = None,
     is_test_mode: bool = False,
 ) -> None:
-    """Background worker that processes clients for email scraping."""
+    """
+    Background worker that processes clients for email scraping.
+    Persisted emails are validated only through validate_scraped_emails_for_storage
+    in _process_single_client (format, disposable domains, MX, SMTP).
+    """
     try:
         await _create_log_and_broadcast(
             scrap_client_job_id,
@@ -542,24 +549,38 @@ async def _run_client_email_scraper(
                         if await is_stopped():
                             return
                         if not is_test_mode and client.id > 0:
-                            if success and emails:
-                                await update_career_client(
-                                    session,
-                                    client.id,
-                                    {
-                                        "emails": emails,
-                                        "official_website": website,
-                                    },
-                                )
-                                completed += 1
+                            fresh = await get_career_client_by_id(
+                                session, client.id
+                            )
+                            if fresh is None:
+                                failed += 1
                             else:
-                                if website:
+                                base_meta: dict = {}
+                                if isinstance(fresh.meta_data, dict):
+                                    base_meta = dict(fresh.meta_data)
+                                if success and emails:
+                                    base_meta["email_found_error"] = False
                                     await update_career_client(
                                         session,
                                         client.id,
-                                        {"official_website": website},
+                                        {
+                                            "emails": emails,
+                                            "official_website": website,
+                                            "meta_data": base_meta,
+                                        },
                                     )
-                                failed += 1
+                                    completed += 1
+                                else:
+                                    base_meta["email_found_error"] = True
+                                    payload: dict = {
+                                        "meta_data": base_meta,
+                                    }
+                                    if website:
+                                        payload["official_website"] = website
+                                    await update_career_client(
+                                        session, client.id, payload
+                                    )
+                                    failed += 1
                             await session.commit()
                         else:
                             if success and emails:

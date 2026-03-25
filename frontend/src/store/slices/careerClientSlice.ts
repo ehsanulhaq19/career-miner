@@ -3,6 +3,7 @@ import { careerClientService } from "@/services/careerClientService";
 import { CareerClient } from "@/types";
 
 export type HasEmailFilter = "all" | "with" | "without";
+export type EmailFoundErrorFilter = "all" | "yes" | "no";
 
 interface CareerClientState {
   items: CareerClient[];
@@ -10,6 +11,7 @@ interface CareerClientState {
   page: number;
   limit: number;
   hasEmailFilter: HasEmailFilter;
+  emailFoundErrorFilter: EmailFoundErrorFilter;
   loading: boolean;
   error: string | null;
 }
@@ -20,6 +22,7 @@ const initialState: CareerClientState = {
   page: 1,
   limit: 20,
   hasEmailFilter: "all",
+  emailFoundErrorFilter: "all",
   loading: false,
   error: null,
 };
@@ -31,6 +34,7 @@ export const fetchCareerClients = createAsyncThunk(
       skip?: number;
       limit?: number;
       hasEmailInformation?: boolean;
+      emailFoundError?: boolean;
     },
     { rejectWithValue }
   ) => {
@@ -38,7 +42,8 @@ export const fetchCareerClients = createAsyncThunk(
       return await careerClientService.getCareerClients(
         params?.skip ?? 0,
         params?.limit ?? 20,
-        params?.hasEmailInformation
+        params?.hasEmailInformation,
+        params?.emailFoundError
       );
     } catch (error: any) {
       return rejectWithValue(
@@ -57,6 +62,9 @@ const careerClientSlice = createSlice({
     },
     setHasEmailFilter(state, action: PayloadAction<HasEmailFilter>) {
       state.hasEmailFilter = action.payload;
+    },
+    setEmailFoundErrorFilter(state, action: PayloadAction<EmailFoundErrorFilter>) {
+      state.emailFoundErrorFilter = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -78,5 +86,6 @@ const careerClientSlice = createSlice({
   },
 });
 
-export const { setPage, setHasEmailFilter } = careerClientSlice.actions;
+export const { setPage, setHasEmailFilter, setEmailFoundErrorFilter } =
+  careerClientSlice.actions;
 export default careerClientSlice.reducer;

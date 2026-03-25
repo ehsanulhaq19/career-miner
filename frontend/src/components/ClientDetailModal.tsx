@@ -176,6 +176,11 @@ export default function ClientDetailModal({
                 </div>
               ) : client ? (
                 <>
+                  {client.meta_data?.email_found_error === true ? (
+                    <div className="p-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-sm text-amber-800 dark:text-amber-200">
+                      Email scrape did not find a valid address for this client.
+                    </div>
+                  ) : null}
                   {(client.emails?.length ?? 0) > 0 || client.official_website ? (
                     <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 space-y-3">
                       {client.emails?.length ? (

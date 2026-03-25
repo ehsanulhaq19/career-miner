@@ -34,6 +34,7 @@ class CareerClientResponse(BaseModel):
     detail: str | None
     link: str | None
     size: str | None
+    meta_data: dict | None = None
     is_active: bool
     created_at: datetime
 

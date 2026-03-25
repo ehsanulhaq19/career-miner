@@ -193,3 +193,12 @@ async def validate_emails_by_domain(emails: list[str]) -> list[str]:
         elif smtp_valid:
             valid.append(normalized)
     return valid
+
+
+async def validate_scraped_emails_for_storage(emails: list[str]) -> list[str]:
+    """
+    Validate email candidates before persisting career client emails from scrap jobs.
+    Applies RFC format checks, disposable-domain blocklist, MX resolution, and SMTP
+    RCPT TO when available. Use this as the only path for scraped email persistence.
+    """
+    return await validate_emails_by_domain(emails)

@@ -116,10 +116,11 @@ export default function WebSocketProvider({
   const scrapClientAttemptsRef = useRef(0);
   const bulkJobApplicationAttemptsRef = useRef(0);
   const bulkEmailSendAttemptsRef = useRef(0);
-  const clientEmailValidationAttemptsRef = useRef(0);
 
   useEffect(() => {
     if (!user?.id || !token) return;
+
+    let clientEmailValidationReconnectAttempts = 0;
 
     const connectScrapJob = () => {
       const ws = new WebSocket(getScrapJobWebSocketUrl(user.id));
@@ -355,17 +356,17 @@ export default function WebSocketProvider({
       ws.onclose = () => {
         clientEmailValidationWsRef.current = null;
         const delay = Math.min(
-          1000 * 2 ** clientEmailValidationAttemptsRef.current,
+          1000 * 2 ** clientEmailValidationReconnectAttempts,
           30000
         );
-        clientEmailValidationAttemptsRef.current += 1;
+        clientEmailValidationReconnectAttempts += 1;
         clientEmailValidationReconnectRef.current = setTimeout(
           connectClientEmailValidation,
           delay
         );
       };
       ws.onopen = () => {
-        clientEmailValidationAttemptsRef.current = 0;
+        clientEmailValidationReconnectAttempts = 0;
       };
     };
 

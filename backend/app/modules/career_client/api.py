@@ -43,6 +43,7 @@ async def list_career_clients_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=500),
     has_email_information: bool | None = Query(None),
+    email_found_error: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CareerClientListResponse:
@@ -52,6 +53,7 @@ async def list_career_clients_endpoint(
         skip=skip,
         limit=limit,
         has_email_information=has_email_information,
+        email_found_error=email_found_error,
     )
 
 

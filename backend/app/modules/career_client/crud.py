@@ -1,7 +1,25 @@
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.models import CareerClient
+
+
+def _apply_email_found_error_filter(query, email_found_error: bool | None):
+    """
+    Filter by meta_data.email_found_error.
+    True: only clients with flag true. False: exclude flag true. None: no filter.
+    """
+    if email_found_error is None:
+        return query
+    if email_found_error is True:
+        return query.where(
+            text("(career_clients.meta_data->>'email_found_error') = 'true'")
+        )
+    return query.where(
+        text(
+            "coalesce(career_clients.meta_data->>'email_found_error', 'false') != 'true'"
+        )
+    )
 
 
 def _apply_has_email_filter(query, has_email_information: bool | None):
@@ -42,6 +60,7 @@ async def get_career_clients(
     skip: int = 0,
     limit: int = 20,
     has_email_information: bool | None = None,
+    email_found_error: bool | None = None,
 ) -> tuple[list[CareerClient], int]:
     """Retrieve a paginated list of active career clients in descending order by id."""
     base_query = (
@@ -50,6 +69,7 @@ async def get_career_clients(
         .order_by(CareerClient.id.desc())
     )
     base_query = _apply_has_email_filter(base_query, has_email_information)
+    base_query = _apply_email_found_error_filter(base_query, email_found_error)
     query = base_query.offset(skip).limit(limit)
 
     count_query = select(func.count(CareerClient.id)).where(
@@ -64,6 +84,7 @@ async def get_career_clients(
             (func.coalesce(func.json_array_length(CareerClient.emails), 0) == 0)
             | (CareerClient.emails.is_(None))
         )
+    count_query = _apply_email_found_error_filter(count_query, email_found_error)
 
     result = await db.execute(query)
     items = list(result.scalars().all())
@@ -139,9 +160,17 @@ async def get_career_clients_without_emails(
     limit: int = 1000,
     client_ids: list[int] | None = None,
 ) -> list[CareerClient]:
-    """Retrieve career clients that have no emails, optionally filtered by ids."""
+    """
+    Retrieve career clients that have no emails, optionally filtered by ids.
+    Excludes clients with meta_data.email_found_error true (scrap already failed).
+    """
     query = select(CareerClient).where(
         func.coalesce(func.json_array_length(CareerClient.emails), 0) == 0
+    )
+    query = query.where(
+        text(
+            "coalesce(career_clients.meta_data->>'email_found_error', 'false') != 'true'"
+        )
     )
     if client_ids:
         query = query.where(CareerClient.id.in_(client_ids))
@@ -252,5 +281,6 @@ async def get_or_create_career_client(
         "detail": detail.strip() if detail else None,
         "link": link.strip() if link else None,
         "size": size.strip() if size else None,
+        "meta_data": {},
     }
     return await create_career_client(db, client_data)

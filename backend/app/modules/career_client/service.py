@@ -41,6 +41,7 @@ async def list_career_clients(
     skip: int = 0,
     limit: int = 20,
     has_email_information: bool | None = None,
+    email_found_error: bool | None = None,
 ) -> CareerClientListResponse:
     """Return a paginated list of active career clients in descending order."""
     items, total = await get_career_clients(
@@ -48,6 +49,7 @@ async def list_career_clients(
         skip=skip,
         limit=limit,
         has_email_information=has_email_information,
+        email_found_error=email_found_error,
     )
 
     response_items = [CareerClientResponse.model_validate(item) for item in items]

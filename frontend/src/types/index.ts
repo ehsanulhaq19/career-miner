@@ -206,6 +206,7 @@ export interface CareerClient {
   official_website?: string | null;
   name: string | null;
   location: string | null;
+  meta_data?: Record<string, unknown> | null;
   detail: string | null;
   link: string | null;
   size: string | null;

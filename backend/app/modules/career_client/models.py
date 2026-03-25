@@ -31,5 +31,6 @@ class CareerClient(Base):
     detail = Column(Text, nullable=True)
     link = Column(Text, nullable=True)
     size = Column(String(100), nullable=True)
+    meta_data = Column(JSON, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())

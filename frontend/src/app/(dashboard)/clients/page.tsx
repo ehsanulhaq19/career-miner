@@ -12,6 +12,7 @@ import {
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchCareerClients,
+  setEmailFoundErrorFilter,
   setHasEmailFilter,
   setPage,
 } from "@/store/slices/careerClientSlice";
@@ -23,7 +24,7 @@ import CleanEmailsModal from "@/components/CleanEmailsModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
-  const { items, total, page, limit, hasEmailFilter, loading } =
+  const { items, total, page, limit, hasEmailFilter, emailFoundErrorFilter, loading } =
     useAppSelector((state) => state.careerClient);
   const [selectedClient, setSelectedClient] = useState<CareerClient | null>(
     null
@@ -38,6 +39,12 @@ export default function ClientsPage() {
     return undefined;
   };
 
+  const getEmailFoundErrorParam = () => {
+    if (emailFoundErrorFilter === "yes") return true;
+    if (emailFoundErrorFilter === "no") return false;
+    return undefined;
+  };
+
   const refetch = () => {
     const skip = (page - 1) * limit;
     dispatch(
@@ -45,6 +52,7 @@ export default function ClientsPage() {
         skip,
         limit,
         hasEmailInformation: getHasEmailParam(),
+        emailFoundError: getEmailFoundErrorParam(),
       })
     );
   };
@@ -56,9 +64,10 @@ export default function ClientsPage() {
         skip,
         limit,
         hasEmailInformation: getHasEmailParam(),
+        emailFoundError: getEmailFoundErrorParam(),
       })
     );
-  }, [dispatch, page, limit, hasEmailFilter]);
+  }, [dispatch, page, limit, hasEmailFilter, emailFoundErrorFilter]);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -66,6 +75,13 @@ export default function ClientsPage() {
     value: "all" | "with" | "without"
   ) => {
     dispatch(setHasEmailFilter(value));
+    dispatch(setPage(1));
+  };
+
+  const handleEmailFoundErrorFilterChange = (
+    value: "all" | "yes" | "no"
+  ) => {
+    dispatch(setEmailFoundErrorFilter(value));
     dispatch(setPage(1));
   };
 
@@ -109,6 +125,19 @@ export default function ClientsPage() {
             <option value="all">All clients</option>
             <option value="with">With emails</option>
             <option value="without">Without emails</option>
+          </select>
+          <select
+            value={emailFoundErrorFilter}
+            onChange={(e) =>
+              handleEmailFoundErrorFilterChange(
+                e.target.value as "all" | "yes" | "no"
+              )
+            }
+            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+          >
+            <option value="all">Email scrape: any</option>
+            <option value="yes">Email scrape failed</option>
+            <option value="no">Email scrape OK</option>
           </select>
         </div>
       </div>
@@ -221,6 +250,11 @@ function ClientCard({
       <h3 className="font-semibold text-gray-900 dark:text-white line-clamp-1 mb-2">
         {client.name || "Unnamed Client"}
       </h3>
+      {client.meta_data?.email_found_error === true && (
+        <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-2">
+          Email fetch failed
+        </p>
+      )}
       {client.location && (
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
           {client.location}
