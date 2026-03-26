@@ -160,6 +160,25 @@ async def update_career_client(
     return client
 
 
+async def assign_scrap_client_job_to_career_clients(
+    db: AsyncSession,
+    career_client_ids: list[int],
+    scrap_client_job_id: int,
+) -> None:
+    """
+    Assign scrap_client_job_id to the given career clients when a job is initiated.
+    """
+    if not career_client_ids:
+        return
+    unique_ids = list(dict.fromkeys(int(x) for x in career_client_ids))
+    await db.execute(
+        update(CareerClient)
+        .where(CareerClient.id.in_(unique_ids))
+        .values(scrap_client_job_id=scrap_client_job_id)
+    )
+    await db.flush()
+
+
 async def get_career_clients_without_emails(
     db: AsyncSession,
     limit: int = 1000,

@@ -43,6 +43,8 @@ class ScrapClientJobResponse(BaseModel):
 
     id: int
     name: str
+    client_site_id: int | None = None
+    source_url: str | None = None
     status: str
     meta_data: dict = Field(default_factory=dict)
     created_at: datetime

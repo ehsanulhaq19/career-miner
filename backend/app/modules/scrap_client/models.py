@@ -48,12 +48,17 @@ class ScrapClientJobStatus(str, enum.Enum):
 
 
 class ScrapClientJob(Base):
-    """SQLAlchemy model representing a client email scraping job execution."""
+    """
+    SQLAlchemy model representing a client scraping job execution.
+    client_site_id and source_url mirror job_site_id on scrap_jobs for initiation context.
+    """
 
     __tablename__ = "scrap_client_jobs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
+    client_site_id = Column(Integer, ForeignKey("client_sites.id"), nullable=True)
+    source_url = Column(Text, nullable=True)
     status = Column(
         String(50),
         default=ScrapClientJobStatus.PENDING.value,

@@ -35,6 +35,7 @@ class CareerClientResponse(BaseModel):
     link: str | None
     size: str | None
     meta_data: dict | None = None
+    scrap_client_job_id: int | None = None
     is_active: bool
     created_at: datetime
 

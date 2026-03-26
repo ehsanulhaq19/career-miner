@@ -422,11 +422,13 @@ async def scrape_clients_from_url(
     url: str,
     use_discovery_when_no_email: bool = True,
     max_pages: int = 5,
+    scrap_client_job_id: int | None = None,
 ) -> int:
     """
     Scrape client/company data from a website URL and save to CareerClient.
     When email is not found and use_discovery_when_no_email is True, uses
     website_discovery to fetch company info by name.
+    When scrap_client_job_id is set, associates touched clients with that job.
     Returns count of clients created/updated.
     """
     normalized_url = normalize_url(url)
@@ -491,6 +493,13 @@ async def scrape_clients_from_url(
         )
         if not career_client:
             continue
+
+        if scrap_client_job_id is not None:
+            await update_career_client(
+                db,
+                career_client.id,
+                {"scrap_client_job_id": scrap_client_job_id},
+            )
 
         if use_discovery_when_no_email and not emails and name:
             discovery: DiscoveryResult = await discover_company_info(

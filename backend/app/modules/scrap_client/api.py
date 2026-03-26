@@ -97,7 +97,10 @@ async def start_scrap_client_from_site_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
-    """Create and start a scrap client job that scrapes client data from a client site URL."""
+    """
+    Create a scrap client job with client_site_id stored on the job row (like job_site_id on scrap jobs),
+    then run the site scraper in the background using the returned job id.
+    """
     result = await start_scrap_client_from_site(db, request.client_site_id)
     background_tasks.add_task(
         _run_site_scraper_background,
@@ -114,7 +117,10 @@ async def start_scrap_client_from_url_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
-    """Create and start a scrap client job that scrapes client data from a URL."""
+    """
+    Create a scrap client job with source_url stored on the job row, then run the URL scraper
+    in the background using the returned job id.
+    """
     result = await start_scrap_client_from_url(db, request.url)
     background_tasks.add_task(
         _run_url_scraper_background,
@@ -131,7 +137,10 @@ async def test_scrap_client_from_site_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
-    """Create and start a test scrap client job from a client site."""
+    """
+    Create a test scrap client job with client_site_id on the job row, then run the site scraper
+    in the background with test mode enabled.
+    """
     result = await start_test_scrap_client_from_site(db, request)
     background_tasks.add_task(
         _run_site_scraper_background,
@@ -149,7 +158,10 @@ async def start_scrap_client_job_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
-    """Create and start a new scrap client job for email fetching."""
+    """
+    Create a scrap client job; when client_ids are provided, assigns scrap_client_job_id on those
+    career clients immediately, then runs the email scraper in the background.
+    """
     result = await start_scrap_client_job(db, request)
     background_tasks.add_task(
         _run_email_scraper_background,
@@ -167,7 +179,11 @@ async def test_scrap_client_job_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
-    """Create and start a test scrap client job. Does not save to database."""
+    """
+    Create a test scrap client job with source_url on the job row when a URL is provided.
+    When client_ids are present, assigns scrap_client_job_id on those career clients at initiation.
+    Does not persist scraped emails; background worker still links clients to this job id.
+    """
     result = await start_test_scrap_client_job(db, request)
     background_tasks.add_task(
         _run_email_scraper_background,
@@ -213,10 +229,12 @@ async def resume_scrap_client_job_endpoint(
     from app.modules.scrap_client.crud import get_scrap_client_job_by_id
 
     job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
-    if job and job.meta_data:
+    if job:
         meta = job.meta_data or {}
-        client_site_id = meta.get("client_site_id")
-        url = meta.get("url")
+        client_site_id = job.client_site_id
+        if client_site_id is None:
+            client_site_id = meta.get("client_site_id")
+        url = job.source_url or meta.get("url")
         client_ids = meta.get("client_ids")
         if client_site_id is not None:
             background_tasks.add_task(

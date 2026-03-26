@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import async_session
 from app.modules.career_client.crud import (
+    assign_scrap_client_job_to_career_clients,
     get_career_client_by_id,
     get_career_clients_without_emails,
     update_career_client,
@@ -344,6 +345,7 @@ async def _run_client_site_scraper(
                 client_site.url,
                 use_discovery_when_no_email=True,
                 max_pages=5,
+                scrap_client_job_id=scrap_client_job_id,
             )
             if await is_stopped():
                 return
@@ -548,12 +550,25 @@ async def _run_client_email_scraper(
                     async with async_session() as session:
                         if await is_stopped():
                             return
-                        if not is_test_mode and client.id > 0:
+                        if client.id > 0:
                             fresh = await get_career_client_by_id(
                                 session, client.id
                             )
                             if fresh is None:
                                 failed += 1
+                            elif is_test_mode:
+                                await update_career_client(
+                                    session,
+                                    client.id,
+                                    {
+                                        "scrap_client_job_id": scrap_client_job_id,
+                                    },
+                                )
+                                await session.commit()
+                                if success and emails:
+                                    completed += 1
+                                else:
+                                    failed += 1
                             else:
                                 base_meta: dict = {}
                                 if isinstance(fresh.meta_data, dict):
@@ -567,6 +582,7 @@ async def _run_client_email_scraper(
                                             "emails": emails,
                                             "official_website": website,
                                             "meta_data": base_meta,
+                                            "scrap_client_job_id": scrap_client_job_id,
                                         },
                                     )
                                     completed += 1
@@ -574,6 +590,7 @@ async def _run_client_email_scraper(
                                     base_meta["email_found_error"] = True
                                     payload: dict = {
                                         "meta_data": base_meta,
+                                        "scrap_client_job_id": scrap_client_job_id,
                                     }
                                     if website:
                                         payload["official_website"] = website
@@ -581,7 +598,7 @@ async def _run_client_email_scraper(
                                         session, client.id, payload
                                     )
                                     failed += 1
-                            await session.commit()
+                                await session.commit()
                         else:
                             if success and emails:
                                 completed += 1
@@ -676,6 +693,7 @@ async def start_scrap_client_job(
     """
     Create and start a new scrap client job for email fetching.
     Requires client_ids or only_clients_without_emails.
+    When client_ids are set, assigns scrap_client_job_id on those career clients before the worker runs.
     """
     if not request.client_ids and not request.only_clients_without_emails:
         raise BadRequestException(
@@ -700,6 +718,10 @@ async def start_scrap_client_job(
             "meta_data": meta_data,
         },
     )
+    if request.client_ids:
+        await assign_scrap_client_job_to_career_clients(
+            db, request.client_ids, scrap_job.id
+        )
     response = ScrapClientJobResponse.model_validate(scrap_job)
     await broadcast_scrap_client_status(
         response.model_dump(), ScrapClientJobStatus.PENDING.value
@@ -764,6 +786,7 @@ async def _run_client_url_scraper(
                 normalized_url,
                 use_discovery_when_no_email=True,
                 max_pages=5,
+                scrap_client_job_id=scrap_client_job_id,
             )
             if await is_stopped():
                 return
@@ -843,6 +866,7 @@ async def start_scrap_client_from_site(
         {
             "name": f"client_site_{client_site.name}_{int(datetime.now(timezone.utc).timestamp())}",
             "status": ScrapClientJobStatus.PENDING.value,
+            "client_site_id": client_site_id,
             "meta_data": meta_data,
         },
     )
@@ -859,7 +883,7 @@ async def start_scrap_client_from_url(
 ) -> ScrapClientJobResponse:
     """
     Create and start a scrap client job that scrapes client data from an arbitrary URL.
-    Extracts companies from the page and saves to CareerClient.
+    Persists source_url on the scrap client job row. Extracts companies from the page and saves to CareerClient.
     """
     from app.modules.scrap_client.services.url_utils import normalize_url
 
@@ -879,6 +903,7 @@ async def start_scrap_client_from_url(
         {
             "name": f"client_url_{int(datetime.now(timezone.utc).timestamp())}",
             "status": ScrapClientJobStatus.PENDING.value,
+            "source_url": normalized_url,
             "meta_data": meta_data,
         },
     )
@@ -893,7 +918,10 @@ async def start_test_scrap_client_from_site(
     db: AsyncSession,
     request: TestScrapClientSiteRequest,
 ) -> ScrapClientJobResponse:
-    """Create and start a test scrap client job from a client site. Does not skip saving."""
+    """
+    Create and start a test scrap client job from a client site with client_site_id on the job row.
+    Extracted clients are saved to CareerClient like non-test site runs.
+    """
     from app.modules.client_site.crud import get_client_site_by_id
 
     client_site = await get_client_site_by_id(db, request.client_site_id)
@@ -909,6 +937,7 @@ async def start_test_scrap_client_from_site(
         {
             "name": f"test_client_site_{client_site.name}_{int(datetime.now(timezone.utc).timestamp())}",
             "status": ScrapClientJobStatus.PENDING.value,
+            "client_site_id": request.client_site_id,
             "meta_data": meta_data,
         },
     )
@@ -923,11 +952,19 @@ async def start_test_scrap_client_job(
     db: AsyncSession,
     request: TestScrapClientRequest,
 ) -> ScrapClientJobResponse:
-    """Create and start a test scrap client job. Does not save emails to database."""
+    """
+    Create and start a test scrap client job with optional source_url on the job row.
+    When client_ids are set, assigns scrap_client_job_id on those career clients at initiation.
+    Does not save scraped emails to career clients during the worker run.
+    """
     if not request.client_ids and not request.url:
         raise BadRequestException(
             detail="Provide at least one client_id or a url to crawl"
         )
+
+    from app.modules.scrap_client.services.url_utils import normalize_url
+
+    normalized_test_url = normalize_url(request.url) if request.url else None
 
     meta_data = {
         "client_ids": request.client_ids,
@@ -935,14 +972,18 @@ async def start_test_scrap_client_job(
         "url": request.url,
         "is_test_mode": True,
     }
-    scrap_job = await create_scrap_client_job(
-        db,
-        {
-            "name": f"test_client_{int(datetime.now(timezone.utc).timestamp())}",
-            "status": ScrapClientJobStatus.PENDING.value,
-            "meta_data": meta_data,
-        },
-    )
+    create_payload: dict = {
+        "name": f"test_client_{int(datetime.now(timezone.utc).timestamp())}",
+        "status": ScrapClientJobStatus.PENDING.value,
+        "meta_data": meta_data,
+    }
+    if normalized_test_url:
+        create_payload["source_url"] = normalized_test_url
+    scrap_job = await create_scrap_client_job(db, create_payload)
+    if request.client_ids:
+        await assign_scrap_client_job_to_career_clients(
+            db, request.client_ids, scrap_job.id
+        )
     response = ScrapClientJobResponse.model_validate(scrap_job)
     await broadcast_scrap_client_status(
         response.model_dump(), ScrapClientJobStatus.PENDING.value
