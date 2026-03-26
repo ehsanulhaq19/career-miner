@@ -114,3 +114,65 @@ class ValidateEmailsStartedResponse(BaseModel):
     """Response when email validation is started in the background."""
 
     status: str = "started"
+
+
+class CareerClientBulkEmailRecipient(BaseModel):
+    """Single recipient for bulk career client outreach email."""
+
+    client_id: int
+    client_email: str
+
+
+class CareerClientBulkEmailSendRequest(BaseModel):
+    """Request body for bulk career client outreach emails."""
+
+    resume_id: int
+    recipients: list[CareerClientBulkEmailRecipient]
+
+    @field_validator("recipients")
+    @classmethod
+    def recipients_non_empty(cls, v: list) -> list:
+        if not v:
+            raise ValueError("At least one recipient is required")
+        return v
+
+
+class CareerClientEmailRowResponse(BaseModel):
+    """One career client email address with historical send count."""
+
+    client_id: int
+    client_name: str | None
+    official_website: str | None
+    location: str | None
+    client_email: str
+    email_count: int
+
+
+class CareerClientEmailRowsListResponse(BaseModel):
+    """Paginated list of career client email rows."""
+
+    items: list[CareerClientEmailRowResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class BulkCareerClientEmailSendLogResponse(BaseModel):
+    """Schema for bulk career client email send log response data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bulk_career_client_email_send_id: int
+    action: str
+    progress: int
+    status: str
+    details: str | None
+    meta_data: dict
+    created_at: datetime
+
+
+class BulkCareerClientEmailSendLogListResponse(BaseModel):
+    """Schema for list of bulk career client email send logs."""
+
+    items: list[BulkCareerClientEmailSendLogResponse]

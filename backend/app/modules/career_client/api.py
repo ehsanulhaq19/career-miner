@@ -1,11 +1,15 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.career_client.schemas import (
+    BulkCareerClientEmailSendLogListResponse,
+    CareerClientBulkEmailSendRequest,
     CareerClientBulkUpdate,
+    CareerClientEmailRowsListResponse,
     CareerClientListResponse,
     CareerClientLocationsResponse,
     CareerClientResponse,
@@ -15,13 +19,19 @@ from app.modules.career_client.schemas import (
     ValidateEmailsRequest,
     ValidateEmailsStartedResponse,
 )
+from app.modules.job_application.schemas import EmailLogResponse
 from app.modules.career_client.service import (
     bulk_update_career_clients,
+    get_bulk_career_client_email_send_logs,
     get_career_client_by_id,
     get_career_client_locations,
+    get_career_client_outreach_email_logs,
+    list_career_client_email_rows,
     list_career_clients,
     remove_invalid_emails,
+    run_bulk_career_client_email_background,
     scan_career_clients,
+    start_bulk_career_client_email_send,
     update_career_client,
     run_validate_client_emails_background,
 )
@@ -36,6 +46,66 @@ async def _validate_client_emails_background_task(
     """Run email validation with a fresh DB session; progress via WebSocket."""
     req = ValidateEmailsRequest.model_validate(body)
     await run_validate_client_emails_background(user_id, req)
+
+
+@router.get(
+    "/email-rows",
+    response_model=CareerClientEmailRowsListResponse,
+)
+async def list_career_client_email_rows_endpoint(
+    page: int = Query(1, ge=1),
+    email_count: Literal["asc", "desc"] | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CareerClientEmailRowsListResponse:
+    """
+    List each career client email with send counts from email logs.
+    Fixed page size 100. Optional email_count sorts rows by log count.
+    """
+    _ = current_user
+    return await list_career_client_email_rows(
+        db, page=page, email_count_sort=email_count
+    )
+
+
+@router.post("/bulk-email/send", status_code=201)
+async def bulk_send_career_client_emails_endpoint(
+    request: CareerClientBulkEmailSendRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Queue bulk outreach emails using LLM-tailored cover letter and resume per recipient.
+    """
+    result = await start_bulk_career_client_email_send(
+        db, request, current_user.id
+    )
+    background_tasks.add_task(
+        run_bulk_career_client_email_background,
+        result["id"],
+        result["resume_id"],
+        result["recipients"],
+        current_user.id,
+    )
+    return {"id": result["id"], "status": result["status"]}
+
+
+@router.get(
+    "/bulk-email/{bulk_id}/logs",
+    response_model=BulkCareerClientEmailSendLogListResponse,
+)
+async def get_bulk_career_client_email_logs_endpoint(
+    bulk_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BulkCareerClientEmailSendLogListResponse:
+    """
+    Return progress logs for a bulk career client email send.
+    """
+    return await get_bulk_career_client_email_send_logs(
+        db, bulk_id, current_user.id
+    )
 
 
 @router.get("/", response_model=CareerClientListResponse)
@@ -64,6 +134,27 @@ async def get_career_client_locations_endpoint(
 ) -> CareerClientLocationsResponse:
     """Return all distinct locations from career clients."""
     return await get_career_client_locations(db)
+
+
+@router.get(
+    "/{career_client_id}/outreach-email-logs",
+    response_model=list[EmailLogResponse],
+)
+async def get_career_client_outreach_email_logs_endpoint(
+    career_client_id: int,
+    client_email: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[EmailLogResponse]:
+    """
+    Return email logs linked to outreach sends for this client and optional email.
+    """
+    return await get_career_client_outreach_email_logs(
+        db,
+        career_client_id,
+        client_email,
+        current_user.id,
+    )
 
 
 @router.get("/{career_client_id}", response_model=CareerClientResponse)

@@ -1,16 +1,38 @@
+import asyncio
+import json
+import os
+import random
+import re
 from collections.abc import Awaitable, Callable
+from pathlib import Path
+from time import time
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import BadRequestException, NotFoundException
+from app.database import async_session
 from app.modules.career_client.crud import (
     bulk_update_career_clients_by_location as crud_bulk_update,
+    create_bulk_career_client_email_send,
+    create_bulk_career_client_email_send_log,
+    create_career_client_email_log,
+    get_bulk_career_client_email_send_by_id,
+    get_bulk_career_client_email_send_logs as crud_get_bulk_cc_email_logs,
     get_career_client_by_id as crud_get_career_client_by_id,
     get_career_clients,
     get_career_clients_by_ids_or_all as crud_get_by_ids_or_all,
     get_distinct_career_client_locations as crud_get_locations,
+    count_career_client_email_rows,
+    get_outreach_email_logs_for_career_client,
+    list_career_client_email_rows_paginated,
     scan_and_deactivate_career_clients as crud_scan_and_deactivate,
-    get_total_career_clients_count,
     update_career_client as crud_update_career_client,
+    update_bulk_career_client_email_send_status,
+)
+from app.modules.career_client.models import BulkCareerClientEmailSendStatus
+from app.modules.career_client.prompts import (
+    CAREER_CLIENT_OUTREACH_SYSTEM_PROMPT,
+    CAREER_CLIENT_OUTREACH_USER_PROMPT_TEMPLATE,
 )
 from app.modules.career_client.schemas import (
     CareerClientBulkUpdate,
@@ -23,7 +45,501 @@ from app.modules.career_client.schemas import (
     ClientInvalidEmailsItem,
     RemoveInvalidEmailsItem,
     ValidateEmailsRequest,
+    CareerClientBulkEmailSendRequest,
+    CareerClientEmailRowResponse,
+    CareerClientEmailRowsListResponse,
+    BulkCareerClientEmailSendLogListResponse,
+    BulkCareerClientEmailSendLogResponse,
 )
+from app.modules.email.service import EmailService
+from app.modules.job_application.schemas import EmailLogResponse
+from app.modules.llm.service import LLMFactory
+from app.modules.resume.crud import get_resume_by_id
+from app.modules.scrap_client.services.email_validator import (
+    validate_emails_by_domain,
+)
+from app.modules.websocket.service import broadcast_bulk_career_client_email_send_log
+from app.config import get_settings
+
+
+def _extract_json_object(text_value: str) -> str | None:
+    """
+    Extract JSON object from LLM response, handling markdown code blocks.
+    """
+    text_value = text_value.strip()
+    if not text_value:
+        return None
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text_value)
+    if match:
+        return match.group(1).strip()
+    depth = 0
+    start = text_value.find("{")
+    if start < 0:
+        return None
+    for i, c in enumerate(text_value[start:], start):
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return text_value[start : i + 1]
+    return None
+
+
+def _generate_outreach_document_name() -> str:
+    """
+    Generate a unique file name prefix for outreach PDFs.
+    """
+    return f"cc_outreach_{int(time() * 1000)}"
+
+
+def _render_resume_html(resume_content: dict) -> str:
+    """
+    Render resume content into HTML using the shared template.
+    """
+    from jinja2 import Environment, FileSystemLoader
+
+    templates_dir = Path(__file__).resolve().parent.parent.parent / "templates"
+    env = Environment(loader=FileSystemLoader(str(templates_dir)))
+    template = env.get_template("resumes/resume.html")
+    return template.render(resume=resume_content)
+
+
+def _html_to_pdf(html_content: str, output_path: Path) -> None:
+    """
+    Convert HTML content to PDF and save to output_path.
+    """
+    from xhtml2pdf import pisa
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w+b") as dest:
+        pisa.CreatePDF(html_content, dest=dest, encoding="utf-8")
+
+
+def _get_outreach_resume_base_dir() -> Path:
+    """
+    Return the base directory for career client outreach PDF output.
+    """
+    settings = get_settings()
+    base = Path(settings.JOB_APPLICATION_OUTPUT_FOLDER)
+    if not base.is_absolute():
+        base = Path(os.getcwd()) / base
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+async def _create_outreach_resume_pdf(
+    resume_content: dict, document_name: str
+) -> str | None:
+    """
+    Generate PDF from resume content; return relative path or None on failure.
+    """
+    try:
+        base_dir = _get_outreach_resume_base_dir()
+        filename = f"{document_name}.pdf"
+        output_path = base_dir / filename
+        html_content = _render_resume_html(resume_content)
+        _html_to_pdf(html_content, output_path)
+        return str(output_path.relative_to(Path(os.getcwd())))
+    except Exception:
+        return None
+
+
+def _recipient_email_allowed(client_emails: list, target: str) -> bool:
+    """
+    Return True if normalized target matches a value in client_emails.
+    """
+    t = (target or "").strip().lower()
+    if not t:
+        return False
+    for e in client_emails or []:
+        if e and str(e).strip().lower() == t:
+            return True
+    return False
+
+
+async def _create_bulk_cc_email_log_and_broadcast(
+    db: AsyncSession,
+    bulk_id: int,
+    user_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "in_progress",
+    details: str | None = None,
+    meta_data: dict | None = None,
+):
+    """
+    Persist a bulk career client email log row and broadcast it on the user WebSocket.
+    """
+    async with async_session() as log_db:
+        try:
+            log = await create_bulk_career_client_email_send_log(
+                log_db,
+                bulk_career_client_email_send_id=bulk_id,
+                action=action,
+                progress=progress,
+                status=status,
+                details=details,
+                meta_data=meta_data,
+            )
+            await log_db.commit()
+            await broadcast_bulk_career_client_email_send_log(
+                BulkCareerClientEmailSendLogResponse.model_validate(
+                    log
+                ).model_dump(),
+                user_id,
+            )
+            return log
+        except Exception:
+            await log_db.rollback()
+            raise
+
+
+async def send_career_client_outreach_email(
+    db: AsyncSession,
+    client_id: int,
+    client_email: str,
+    resume_id: int,
+    user_id: int,
+) -> None:
+    """
+    Build tailored cover letter and resume via LLM, generate PDF, send one email,
+    and link the email log to the career client.
+    """
+    client = await crud_get_career_client_by_id(db, client_id)
+    if client is None:
+        raise NotFoundException(detail="Career client not found")
+    if not _recipient_email_allowed(client.emails or [], client_email):
+        raise BadRequestException(
+            detail="client_email must be one of the client's stored emails",
+        )
+    verified = await validate_emails_by_domain([client_email.strip()])
+    if not verified:
+        raise BadRequestException(detail="client_email failed verification")
+
+    resume = await get_resume_by_id(db, resume_id, user_id)
+    if resume is None:
+        raise NotFoundException(detail="Resume not found")
+
+    company_context = {
+        "name": client.name,
+        "detail": client.detail or "",
+        "location": client.location or "",
+        "official_website": client.official_website or "",
+        "size": client.size or "",
+    }
+    company_context_str = json.dumps(company_context, indent=2, default=str)
+    resume_content_raw = resume.content or ""
+    resume_extra_detail = getattr(resume, "extra_detail", None) or ""
+
+    prompt = CAREER_CLIENT_OUTREACH_USER_PROMPT_TEMPLATE.format(
+        task="create outreach resume and cover letter for this company",
+        company_context=company_context_str,
+        target_email=client_email.strip(),
+        resume_content=resume_content_raw,
+        resume_extra_detail=resume_extra_detail,
+    )
+
+    llm_client = LLMFactory.get_client(
+        provider_name="grok",
+        model_name="grok-4-1-fast-reasoning",
+    )
+    response = await llm_client.generate_content(
+        system_prompt=CAREER_CLIENT_OUTREACH_SYSTEM_PROMPT,
+        prompt=prompt,
+    )
+    response_text = (response or "").strip()
+    json_str = _extract_json_object(response_text) or response_text
+    json_str = re.sub(r",\s*}", "}", json_str)
+    json_str = re.sub(r",\s*]", "]", json_str)
+
+    try:
+        parsed = json.loads(json_str)
+    except json.JSONDecodeError:
+        raise BadRequestException(
+            detail="Failed to parse LLM response as valid JSON",
+        )
+
+    subject = parsed.get("subject") or ""
+    cover_letter = parsed.get("cover_letter") or ""
+    resume_content = parsed.get("resume_content")
+    if not isinstance(resume_content, dict):
+        resume_content = {}
+
+    document_name = _generate_outreach_document_name()
+    attachment_path = await _create_outreach_resume_pdf(
+        resume_content, document_name
+    )
+
+    email_service = EmailService()
+    send_result = await email_service.send_email(
+        recipient=client_email.strip(),
+        subject=subject,
+        content=cover_letter,
+        attachment_path=attachment_path,
+        attachment_filename=resume.name,
+        raise_on_failure=False,
+    )
+    email_log_id = send_result.get("email_log_id")
+    if email_log_id:
+        await create_career_client_email_log(db, client_id, email_log_id)
+    if send_result.get("status") != "success":
+        raise BadRequestException(
+            detail=send_result.get("response") or "Email send failed",
+        )
+
+
+async def start_bulk_career_client_email_send(
+    db: AsyncSession,
+    request: CareerClientBulkEmailSendRequest,
+    user_id: int,
+) -> dict:
+    """
+    Create a bulk career client email send record; processing continues in background.
+    """
+    resume = await get_resume_by_id(db, request.resume_id, user_id)
+    if resume is None:
+        raise NotFoundException(detail="Resume not found")
+
+    recipient_dicts = [
+        {"client_id": r.client_id, "client_email": r.client_email}
+        for r in request.recipients
+    ]
+    meta_data = {
+        "resume_id": request.resume_id,
+        "recipients": recipient_dicts,
+        "total": len(recipient_dicts),
+    }
+    bulk = await create_bulk_career_client_email_send(
+        db,
+        {
+            "user_id": user_id,
+            "status": BulkCareerClientEmailSendStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    return {
+        "id": bulk.id,
+        "status": bulk.status,
+        "resume_id": request.resume_id,
+        "recipients": recipient_dicts,
+    }
+
+
+async def run_bulk_career_client_email_background(
+    bulk_id: int,
+    resume_id: int,
+    recipients: list[dict],
+    user_id: int,
+) -> None:
+    """
+    Process each recipient sequentially with logging and WebSocket updates.
+    """
+    async with async_session() as db:
+        try:
+            bulk = await get_bulk_career_client_email_send_by_id(db, bulk_id)
+            if bulk is None:
+                return
+
+            await update_bulk_career_client_email_send_status(
+                db, bulk_id, BulkCareerClientEmailSendStatus.IN_PROGRESS.value
+            )
+            await db.commit()
+
+            await _create_bulk_cc_email_log_and_broadcast(
+                db,
+                bulk_id,
+                user_id,
+                "bulk_cc_email_started",
+                progress=0,
+                status="in_progress",
+                details=(
+                    "Starting bulk career client email send for "
+                    f"{len(recipients)} recipients"
+                ),
+                meta_data={"total": len(recipients)},
+            )
+
+            total = len(recipients)
+            success_count = 0
+            failed_count = 0
+
+            for idx, rec in enumerate(recipients):
+                progress = int((idx / total) * 100) if total > 0 else 0
+                cid = rec.get("client_id")
+                cemail = rec.get("client_email")
+                await _create_bulk_cc_email_log_and_broadcast(
+                    db,
+                    bulk_id,
+                    user_id,
+                    "career_client_email_started",
+                    progress=progress,
+                    status="in_progress",
+                    details=f"Sending email {idx + 1}/{total}",
+                    meta_data={
+                        "client_id": cid,
+                        "client_email": cemail,
+                        "index": idx + 1,
+                        "total": total,
+                    },
+                )
+
+                try:
+                    await asyncio.sleep(random.randint(1, 3))
+                    async with async_session() as work_db:
+                        await send_career_client_outreach_email(
+                            work_db,
+                            int(cid),
+                            str(cemail),
+                            resume_id,
+                            user_id,
+                        )
+                        await work_db.commit()
+                    success_count += 1
+                    await _create_bulk_cc_email_log_and_broadcast(
+                        db,
+                        bulk_id,
+                        user_id,
+                        "career_client_email_sent",
+                        progress=int(((idx + 1) / total) * 100) if total > 0 else 100,
+                        status="completed",
+                        details=f"Email sent for client {cid}",
+                        meta_data={
+                            "client_id": cid,
+                            "client_email": cemail,
+                            "index": idx + 1,
+                            "total": total,
+                        },
+                    )
+                except Exception:
+                    failed_count += 1
+                    await _create_bulk_cc_email_log_and_broadcast(
+                        db,
+                        bulk_id,
+                        user_id,
+                        "career_client_email_failed",
+                        progress=int(((idx + 1) / total) * 100) if total > 0 else 100,
+                        status="error",
+                        details=f"Failed to send for client {cid}",
+                        meta_data={
+                            "client_id": cid,
+                            "client_email": cemail,
+                            "index": idx + 1,
+                            "total": total,
+                        },
+                    )
+
+            final_status = BulkCareerClientEmailSendStatus.COMPLETED.value
+            if failed_count > 0 and success_count == 0:
+                final_status = BulkCareerClientEmailSendStatus.ERROR.value
+            elif failed_count > 0:
+                final_status = BulkCareerClientEmailSendStatus.COMPLETED.value
+
+            await update_bulk_career_client_email_send_status(
+                db, bulk_id, final_status
+            )
+            await db.commit()
+
+            await _create_bulk_cc_email_log_and_broadcast(
+                db,
+                bulk_id,
+                user_id,
+                "bulk_cc_email_completed",
+                progress=100,
+                status="completed",
+                details=(
+                    f"Bulk email finished. Success: {success_count}, "
+                    f"Failed: {failed_count}"
+                ),
+                meta_data={
+                    "success_count": success_count,
+                    "failed_count": failed_count,
+                    "total": total,
+                },
+            )
+        except Exception:
+            await db.rollback()
+            try:
+                async with async_session() as err_db:
+                    await update_bulk_career_client_email_send_status(
+                        err_db,
+                        bulk_id,
+                        BulkCareerClientEmailSendStatus.ERROR.value,
+                    )
+                    await err_db.commit()
+            except Exception:
+                pass
+
+
+async def get_bulk_career_client_email_send_logs(
+    db: AsyncSession,
+    bulk_career_client_email_send_id: int,
+    user_id: int,
+) -> BulkCareerClientEmailSendLogListResponse:
+    """
+    Return all logs for a bulk career client email send owned by the user.
+    """
+    bulk = await get_bulk_career_client_email_send_by_id(
+        db, bulk_career_client_email_send_id
+    )
+    if bulk is None:
+        raise NotFoundException(detail="Bulk career client email send not found")
+    if bulk.user_id != user_id:
+        raise NotFoundException(detail="Bulk career client email send not found")
+
+    logs = await crud_get_bulk_cc_email_logs(
+        db, bulk_career_client_email_send_id
+    )
+    return BulkCareerClientEmailSendLogListResponse(
+        items=[
+            BulkCareerClientEmailSendLogResponse.model_validate(log)
+            for log in logs
+        ]
+    )
+
+
+async def list_career_client_email_rows(
+    db: AsyncSession,
+    page: int,
+    email_count_sort: str | None,
+) -> CareerClientEmailRowsListResponse:
+    """
+    Return paginated career client email rows with historical send counts.
+    """
+    limit = 100
+    if page < 1:
+        raise BadRequestException(detail="page must be >= 1")
+    skip = (page - 1) * limit
+    total = await count_career_client_email_rows(db)
+    rows = await list_career_client_email_rows_paginated(
+        db, skip=skip, limit=limit, email_count_sort=email_count_sort
+    )
+    items = [CareerClientEmailRowResponse.model_validate(r) for r in rows]
+    return CareerClientEmailRowsListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+async def get_career_client_outreach_email_logs(
+    db: AsyncSession,
+    career_client_id: int,
+    client_email: str | None,
+    user_id: int,
+) -> list[EmailLogResponse]:
+    """
+    Return email logs for outreach sends linked to a career client.
+    """
+    _ = user_id
+    client = await crud_get_career_client_by_id(db, career_client_id)
+    if client is None:
+        raise NotFoundException(detail="Career client not found")
+    logs = await get_outreach_email_logs_for_career_client(
+        db, career_client_id, client_email
+    )
+    return [EmailLogResponse.model_validate(log) for log in logs]
 
 
 async def get_career_client_by_id(

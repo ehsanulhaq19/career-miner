@@ -12,6 +12,7 @@ import resumeReducer from "./slices/resumeSlice";
 import scrapClientReducer from "./slices/scrapClientSlice";
 import bulkJobApplicationReducer from "./slices/bulkJobApplicationSlice";
 import bulkEmailSendReducer from "./slices/bulkEmailSendSlice";
+import bulkCareerClientEmailReducer from "./slices/bulkCareerClientEmailSlice";
 import clientEmailValidationReducer from "./slices/clientEmailValidationSlice";
 
 export const store = configureStore({
@@ -28,6 +29,7 @@ export const store = configureStore({
     scrapClient: scrapClientReducer,
     bulkJobApplication: bulkJobApplicationReducer,
     bulkEmailSend: bulkEmailSendReducer,
+    bulkCareerClientEmail: bulkCareerClientEmailReducer,
     clientEmailValidation: clientEmailValidationReducer,
   },
 });

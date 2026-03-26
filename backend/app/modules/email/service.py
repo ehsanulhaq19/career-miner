@@ -43,11 +43,14 @@ class EmailService:
         attachment_path: str | None = None,
         attachment: bytes | None = None,
         attachment_filename: str | None = None,
+        raise_on_failure: bool = True,
     ) -> dict:
         """
         Send an email to the specified recipient with optional file attachment.
         Creates an entry in email_logs table with subject, content, file_attachment,
         to_email, from_email, response and status.
+        When raise_on_failure is False, SMTP errors are recorded in the log and
+        returned in the response dict instead of raising.
         """
         if not self._username or not self._password:
             raise BadRequestException(
@@ -114,6 +117,8 @@ class EmailService:
                 await log_db.commit()
                 email_log_id = email_log.id
 
+        if send_error is not None and raise_on_failure:
+            raise send_error
         return {"status": status, "response": response, "email_log_id": email_log_id}
 
 

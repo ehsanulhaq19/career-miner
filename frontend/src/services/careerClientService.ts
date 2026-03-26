@@ -1,5 +1,11 @@
 import api from "./api";
-import { CareerClient, PaginatedResponse } from "@/types";
+import {
+  BulkCareerClientEmailSendLog,
+  CareerClient,
+  CareerClientEmailRow,
+  EmailLog,
+  PaginatedResponse,
+} from "@/types";
 
 export interface CareerClientUpdatePayload {
   emails?: string[];
@@ -97,6 +103,54 @@ export const careerClientService = {
     const { data } = await api.post<{ updated_count: number }>(
       "/career-clients/remove-invalid-emails",
       { clients }
+    );
+    return data;
+  },
+
+  async getCareerClientEmailRows(
+    page: number,
+    emailCount?: "asc" | "desc" | null
+  ) {
+    const params: Record<string, string | number> = { page };
+    if (emailCount === "asc" || emailCount === "desc") {
+      params.email_count = emailCount;
+    }
+    const { data } = await api.get<PaginatedResponse<CareerClientEmailRow>>(
+      "/career-clients/email-rows",
+      { params }
+    );
+    return data;
+  },
+
+  async bulkSendCareerClientEmails(
+    resumeId: number,
+    recipients: { client_id: number; client_email: string }[]
+  ) {
+    const { data } = await api.post<{ id: number; status: string }>(
+      "/career-clients/bulk-email/send",
+      { resume_id: resumeId, recipients }
+    );
+    return data;
+  },
+
+  async getBulkCareerClientEmailSendLogs(bulkId: number) {
+    const { data } = await api.get<{ items: BulkCareerClientEmailSendLog[] }>(
+      `/career-clients/bulk-email/${bulkId}/logs`
+    );
+    return data;
+  },
+
+  async getCareerClientOutreachEmailLogs(
+    careerClientId: number,
+    clientEmail?: string | null
+  ) {
+    const params: Record<string, string> = {};
+    if (clientEmail && clientEmail.trim()) {
+      params.client_email = clientEmail.trim();
+    }
+    const { data } = await api.get<EmailLog[]>(
+      `/career-clients/${careerClientId}/outreach-email-logs`,
+      { params }
     );
     return data;
   },

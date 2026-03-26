@@ -1,7 +1,12 @@
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.career_client.models import CareerClient
+from app.modules.career_client.models import (
+    BulkCareerClientEmailSend,
+    BulkCareerClientEmailSendLog,
+    CareerClient,
+    CareerClientEmailLog,
+)
 
 
 def _apply_email_found_error_filter(query, email_found_error: bool | None):
@@ -284,3 +289,225 @@ async def get_or_create_career_client(
         "meta_data": {},
     }
     return await create_career_client(db, client_data)
+
+
+async def create_career_client_email_log(
+    db: AsyncSession,
+    career_client_id: int,
+    email_log_id: int,
+) -> CareerClientEmailLog:
+    """
+    Create a pivot row linking a career client to an email log entry.
+    """
+    row = CareerClientEmailLog(
+        career_client_id=career_client_id,
+        email_log_id=email_log_id,
+    )
+    db.add(row)
+    await db.flush()
+    await db.refresh(row)
+    return row
+
+
+async def create_bulk_career_client_email_send(
+    db: AsyncSession,
+    data: dict,
+) -> BulkCareerClientEmailSend:
+    """
+    Create a new bulk career client email send record.
+    """
+    record = BulkCareerClientEmailSend(**data)
+    db.add(record)
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+async def get_bulk_career_client_email_send_by_id(
+    db: AsyncSession,
+    bulk_id: int,
+) -> BulkCareerClientEmailSend | None:
+    """
+    Retrieve a bulk career client email send by id.
+    """
+    result = await db.execute(
+        select(BulkCareerClientEmailSend).where(
+            BulkCareerClientEmailSend.id == bulk_id
+        )
+    )
+    return result.scalars().first()
+
+
+async def create_bulk_career_client_email_send_log(
+    db: AsyncSession,
+    bulk_career_client_email_send_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "pending",
+    details: str | None = None,
+    meta_data: dict | None = None,
+) -> BulkCareerClientEmailSendLog:
+    """
+    Create a new bulk career client email send log entry.
+    """
+    log = BulkCareerClientEmailSendLog(
+        bulk_career_client_email_send_id=bulk_career_client_email_send_id,
+        action=action,
+        progress=progress,
+        status=status,
+        details=details,
+        meta_data=meta_data or {},
+    )
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+    return log
+
+
+async def get_bulk_career_client_email_send_logs(
+    db: AsyncSession,
+    bulk_career_client_email_send_id: int,
+) -> list[BulkCareerClientEmailSendLog]:
+    """
+    Retrieve all logs for a bulk career client email send.
+    """
+    result = await db.execute(
+        select(BulkCareerClientEmailSendLog)
+        .where(
+            BulkCareerClientEmailSendLog.bulk_career_client_email_send_id
+            == bulk_career_client_email_send_id
+        )
+        .order_by(BulkCareerClientEmailSendLog.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def update_bulk_career_client_email_send_status(
+    db: AsyncSession,
+    bulk_id: int,
+    status: str,
+) -> BulkCareerClientEmailSend | None:
+    """
+    Update the status of a bulk career client email send.
+    """
+    record = await get_bulk_career_client_email_send_by_id(db, bulk_id)
+    if record is None:
+        return None
+    record.status = status
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+def _email_rows_order_clause(email_count_sort: str | None) -> str:
+    """
+    Build an ORDER BY clause for email row listing (whitelist only).
+    """
+    if email_count_sort == "asc":
+        return "email_count ASC, client_id DESC, client_email ASC"
+    if email_count_sort == "desc":
+        return "email_count DESC, client_id DESC, client_email ASC"
+    return "client_id DESC, client_email ASC"
+
+
+async def count_career_client_email_rows(db: AsyncSession) -> int:
+    """
+    Count total flattened career client email rows (one per stored email).
+    """
+    stmt = text(
+        """
+        WITH expanded AS (
+            SELECT
+                c.id AS client_id,
+                e.elem AS client_email
+            FROM career_clients c
+            CROSS JOIN LATERAL jsonb_array_elements_text(
+                COALESCE(c.emails::jsonb, '[]'::jsonb)
+            ) AS e(elem)
+            WHERE c.is_active = true
+        )
+        SELECT COUNT(*) AS n FROM expanded
+        """
+    )
+    result = await db.execute(stmt)
+    row = result.first()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+async def list_career_client_email_rows_paginated(
+    db: AsyncSession,
+    skip: int,
+    limit: int,
+    email_count_sort: str | None,
+) -> list[dict]:
+    """
+    List flattened client emails with send counts from email_logs, paginated.
+    """
+    order_sql = _email_rows_order_clause(email_count_sort)
+    stmt = text(
+        f"""
+        WITH expanded AS (
+            SELECT
+                c.id AS client_id,
+                c.name AS client_name,
+                c.official_website,
+                c.location,
+                e.elem AS client_email
+            FROM career_clients c
+            CROSS JOIN LATERAL jsonb_array_elements_text(
+                COALESCE(c.emails::jsonb, '[]'::jsonb)
+            ) AS e(elem)
+            WHERE c.is_active = true
+        ),
+        counts AS (
+            SELECT LOWER(TRIM(to_email)) AS norm_email, COUNT(*)::int AS email_count
+            FROM email_logs
+            GROUP BY LOWER(TRIM(to_email))
+        ),
+        with_counts AS (
+            SELECT
+                ex.client_id,
+                ex.client_name,
+                ex.official_website,
+                ex.location,
+                ex.client_email,
+                COALESCE(ct.email_count, 0)::int AS email_count
+            FROM expanded ex
+            LEFT JOIN counts ct
+                ON ct.norm_email = LOWER(TRIM(ex.client_email))
+        )
+        SELECT client_id, client_name, official_website, location, client_email, email_count
+        FROM with_counts
+        ORDER BY {order_sql}
+        OFFSET :skip LIMIT :limit
+        """
+    ).bindparams(skip=skip, limit=limit)
+    result = await db.execute(stmt)
+    rows = result.mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def get_outreach_email_logs_for_career_client(
+    db: AsyncSession,
+    career_client_id: int,
+    client_email: str | None,
+) -> list:
+    """
+    Return email logs linked to a career client, optionally filtered by recipient email.
+    """
+    from app.modules.email.models import EmailLog
+
+    q = (
+        select(EmailLog)
+        .join(
+            CareerClientEmailLog,
+            CareerClientEmailLog.email_log_id == EmailLog.id,
+        )
+        .where(CareerClientEmailLog.career_client_id == career_client_id)
+        .order_by(EmailLog.created_at.desc())
+    )
+    if client_email and str(client_email).strip():
+        norm = str(client_email).strip().lower()
+        q = q.where(func.lower(func.trim(EmailLog.to_email)) == norm)
+    result = await db.execute(q)
+    return list(result.scalars().all())

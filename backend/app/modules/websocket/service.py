@@ -1,6 +1,7 @@
 """WebSocket broadcast service for sending messages to channels."""
 
 from app.modules.websocket.constants.socket_message_types import (
+    BULK_CAREER_CLIENT_EMAIL_SEND_LOG,
     BULK_JOB_APPLICATION_EMAIL_SEND_LOG,
     BULK_JOB_APPLICATION_LOG,
     CLIENT_EMAIL_VALIDATION_COMPLETED,
@@ -28,6 +29,9 @@ SCRAP_CLIENT_CHANNEL_PREFIX = "/ws/scrap_client/"
 BULK_JOB_APPLICATION_CHANNEL_PREFIX = "/ws/bulk_job_application/"
 BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX = (
     "/ws/bulk_job_application_email/"
+)
+BULK_CAREER_CLIENT_EMAIL_SEND_CHANNEL_PREFIX = (
+    "/ws/bulk_career_client_email/"
 )
 CLIENT_EMAIL_VALIDATION_CHANNEL_PREFIX = "/ws/client_email_validation/"
 
@@ -205,6 +209,40 @@ async def broadcast_bulk_job_application_email_send_log(
     channel = f"{BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX}{user_id}"
     await connection_manager.send_to_channel(
         channel, BULK_JOB_APPLICATION_EMAIL_SEND_LOG, data
+    )
+
+
+def _bulk_career_client_email_send_log_data(log: dict) -> dict:
+    """
+    Build data payload for bulk career client email send log socket messages.
+    """
+    created_at = log.get("created_at")
+    if hasattr(created_at, "isoformat"):
+        created_at = created_at.isoformat()
+    return {
+        "id": log.get("id"),
+        "bulk_career_client_email_send_id": log.get(
+            "bulk_career_client_email_send_id"
+        ),
+        "action": log.get("action"),
+        "progress": log.get("progress"),
+        "status": log.get("status"),
+        "details": log.get("details"),
+        "meta_data": log.get("meta_data", {}),
+        "created_at": created_at,
+    }
+
+
+async def broadcast_bulk_career_client_email_send_log(
+    log: dict, user_id: int
+) -> None:
+    """
+    Broadcast bulk career client email send log update to the user's channel.
+    """
+    data = _bulk_career_client_email_send_log_data(log)
+    channel = f"{BULK_CAREER_CLIENT_EMAIL_SEND_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.send_to_channel(
+        channel, BULK_CAREER_CLIENT_EMAIL_SEND_LOG, data
     )
 
 

@@ -8,6 +8,7 @@ import {
 } from "@/store/slices/scrapJobSlice";
 import { addBulkJobApplicationLogFromSocket } from "@/store/slices/bulkJobApplicationSlice";
 import { addBulkEmailSendLogFromSocket } from "@/store/slices/bulkEmailSendSlice";
+import { addBulkCareerClientEmailLogFromSocket } from "@/store/slices/bulkCareerClientEmailSlice";
 import {
   updateScrapClientJobFromSocket,
   addScrapClientLogFromSocket,
@@ -19,6 +20,7 @@ import {
 } from "@/store/slices/clientEmailValidationSlice";
 import {
   BULK_JOB_APPLICATION_LOG,
+  BULK_CAREER_CLIENT_EMAIL_SEND_LOG,
   BULK_JOB_APPLICATION_EMAIL_SEND_LOG,
   SCRAP_JOB_PENDING,
   SCRAP_JOB_IN_PROGRESS,
@@ -88,6 +90,13 @@ function getBulkEmailSendWebSocketUrl(userId: number): string {
   return `${wsBase}/ws/bulk_job_application_email/${userId}?token=${encodeURIComponent(token || "")}`;
 }
 
+function getBulkCareerClientEmailWebSocketUrl(userId: number): string {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+  const wsBase = baseUrl.replace(/^http/, "ws").replace("/api", "");
+  const token = Cookies.get("token");
+  return `${wsBase}/ws/bulk_career_client_email/${userId}?token=${encodeURIComponent(token || "")}`;
+}
+
 function getClientEmailValidationWebSocketUrl(userId: number): string {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
   const wsBase = baseUrl.replace(/^http/, "ws").replace("/api", "");
@@ -106,16 +115,20 @@ export default function WebSocketProvider({
   const scrapClientWsRef = useRef<WebSocket | null>(null);
   const bulkJobApplicationWsRef = useRef<WebSocket | null>(null);
   const bulkEmailSendWsRef = useRef<WebSocket | null>(null);
+  const bulkCareerClientEmailWsRef = useRef<WebSocket | null>(null);
   const clientEmailValidationWsRef = useRef<WebSocket | null>(null);
   const scrapJobReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapClientReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const bulkJobApplicationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const bulkEmailSendReconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const bulkCareerClientEmailReconnectRef =
+    useRef<ReturnType<typeof setTimeout>>();
   const clientEmailValidationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapJobAttemptsRef = useRef(0);
   const scrapClientAttemptsRef = useRef(0);
   const bulkJobApplicationAttemptsRef = useRef(0);
   const bulkEmailSendAttemptsRef = useRef(0);
+  const bulkCareerClientEmailAttemptsRef = useRef(0);
 
   useEffect(() => {
     if (!user?.id || !token) return;
@@ -315,6 +328,49 @@ export default function WebSocketProvider({
       };
     };
 
+    const connectBulkCareerClientEmail = () => {
+      const ws = new WebSocket(getBulkCareerClientEmailWebSocketUrl(user.id));
+      bulkCareerClientEmailWsRef.current = ws;
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const { type, data } = message;
+          if (!type || !data) return;
+          if (type !== BULK_CAREER_CLIENT_EMAIL_SEND_LOG) return;
+          dispatch(
+            addBulkCareerClientEmailLogFromSocket({
+              id: data.id,
+              bulk_career_client_email_send_id:
+                data.bulk_career_client_email_send_id,
+              action: data.action,
+              progress: data.progress,
+              status: data.status,
+              details: data.details,
+              meta_data: data.meta_data || {},
+              created_at: data.created_at,
+            })
+          );
+        } catch {
+          return;
+        }
+      };
+      ws.onclose = () => {
+        bulkCareerClientEmailWsRef.current = null;
+        const delay = Math.min(
+          1000 * 2 ** bulkCareerClientEmailAttemptsRef.current,
+          30000
+        );
+        bulkCareerClientEmailAttemptsRef.current += 1;
+        bulkCareerClientEmailReconnectRef.current = setTimeout(
+          connectBulkCareerClientEmail,
+          delay
+        );
+      };
+      ws.onopen = () => {
+        bulkCareerClientEmailAttemptsRef.current = 0;
+      };
+    };
+
     const connectClientEmailValidation = () => {
       const ws = new WebSocket(getClientEmailValidationWebSocketUrl(user.id));
       clientEmailValidationWsRef.current = ws;
@@ -374,6 +430,7 @@ export default function WebSocketProvider({
     connectScrapClient();
     connectBulkJobApplication();
     connectBulkEmailSend();
+    connectBulkCareerClientEmail();
     connectClientEmailValidation();
 
     return () => {
@@ -389,6 +446,9 @@ export default function WebSocketProvider({
       if (bulkEmailSendReconnectRef.current) {
         clearTimeout(bulkEmailSendReconnectRef.current);
       }
+      if (bulkCareerClientEmailReconnectRef.current) {
+        clearTimeout(bulkCareerClientEmailReconnectRef.current);
+      }
       if (clientEmailValidationReconnectRef.current) {
         clearTimeout(clientEmailValidationReconnectRef.current);
       }
@@ -399,6 +459,10 @@ export default function WebSocketProvider({
       if (bulkEmailSendWsRef.current) {
         bulkEmailSendWsRef.current.close();
         bulkEmailSendWsRef.current = null;
+      }
+      if (bulkCareerClientEmailWsRef.current) {
+        bulkCareerClientEmailWsRef.current.close();
+        bulkCareerClientEmailWsRef.current = null;
       }
       if (scrapJobWsRef.current) {
         scrapJobWsRef.current.close();

@@ -14,6 +14,9 @@ BULK_JOB_APPLICATION_CHANNEL_PREFIX = "/ws/bulk_job_application/"
 BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX = (
     "/ws/bulk_job_application_email/"
 )
+BULK_CAREER_CLIENT_EMAIL_SEND_CHANNEL_PREFIX = (
+    "/ws/bulk_career_client_email/"
+)
 CLIENT_EMAIL_VALIDATION_CHANNEL_PREFIX = "/ws/client_email_validation/"
 
 
@@ -129,6 +132,35 @@ async def bulk_job_application_email_websocket(
         return
 
     channel = f"{BULK_JOB_APPLICATION_EMAIL_SEND_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.connect(websocket, channel)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        connection_manager.disconnect(websocket, channel)
+
+
+@router.websocket("/ws/bulk_career_client_email/{user_id}")
+async def bulk_career_client_email_websocket(
+    websocket: WebSocket,
+    user_id: int,
+    token: str = Query(...),
+) -> None:
+    """
+    WebSocket endpoint for bulk career client email send updates.
+    Requires valid JWT token in query parameter.
+    """
+    try:
+        payload = verify_token(token)
+        token_user_id = payload.get("sub")
+        if token_user_id is None or int(token_user_id) != user_id:
+            await websocket.close(code=4001)
+            return
+    except (JWTError, ValueError):
+        await websocket.close(code=4001)
+        return
+
+    channel = f"{BULK_CAREER_CLIENT_EMAIL_SEND_CHANNEL_PREFIX}{user_id}"
     await connection_manager.connect(websocket, channel)
     try:
         while True:

@@ -214,6 +214,26 @@ export interface CareerClient {
   created_at: string;
 }
 
+export interface CareerClientEmailRow {
+  client_id: number;
+  client_name: string | null;
+  official_website: string | null;
+  location: string | null;
+  client_email: string;
+  email_count: number;
+}
+
+export interface BulkCareerClientEmailSendLog {
+  id: number;
+  bulk_career_client_email_send_id: number;
+  action: string;
+  progress: number;
+  status: string;
+  details: string | null;
+  meta_data: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface ActiveJobsByFit {
   score_100: number;
   above_90: number;

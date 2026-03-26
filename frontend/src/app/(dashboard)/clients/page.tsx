@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
+  HiOutlineEnvelope,
   HiOutlineMagnifyingGlassCircle,
   HiOutlinePencilSquare,
   HiOutlineUserGroup,
@@ -21,6 +22,7 @@ import ClientDetailModal from "@/components/ClientDetailModal";
 import BulkEditModal from "@/components/BulkEditModal";
 import ScanClientsModal from "@/components/ScanClientsModal";
 import CleanEmailsModal from "@/components/CleanEmailsModal";
+import BulkCareerClientEmailModal from "@/components/BulkCareerClientEmailModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
@@ -32,6 +34,7 @@ export default function ClientsPage() {
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [scanModalOpen, setScanModalOpen] = useState(false);
   const [cleanEmailsOpen, setCleanEmailsOpen] = useState(false);
+  const [bulkEmailOpen, setBulkEmailOpen] = useState(false);
 
   const getHasEmailParam = () => {
     if (hasEmailFilter === "with") return true;
@@ -92,6 +95,13 @@ export default function ClientsPage() {
           Clients
         </h2>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setBulkEmailOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlineEnvelope className="w-4 h-4" />
+            Bulk email
+          </button>
           <button
             onClick={() => setScanModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
@@ -222,6 +232,10 @@ export default function ClientsPage() {
         isOpen={cleanEmailsOpen}
         onClose={() => setCleanEmailsOpen(false)}
         onUpdated={refetch}
+      />
+      <BulkCareerClientEmailModal
+        isOpen={bulkEmailOpen}
+        onClose={() => setBulkEmailOpen(false)}
       />
     </div>
   );
