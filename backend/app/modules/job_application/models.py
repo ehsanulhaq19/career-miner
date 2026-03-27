@@ -77,6 +77,23 @@ class BulkJobApplication(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class JobApplicationBulkJobApplicationLink(Base):
+    """
+    SQLAlchemy pivot preserving each association between a job application and a bulk run.
+    """
+
+    __tablename__ = "job_application_bulk_job_application_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_application_id = Column(
+        Integer, ForeignKey("job_applications.id"), nullable=False
+    )
+    bulk_job_application_id = Column(
+        Integer, ForeignKey("bulk_job_applications.id"), nullable=False
+    )
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class JobApplication(Base):
     """
     SQLAlchemy model representing a job application with generated content.
@@ -113,6 +130,11 @@ class JobApplicationEmailLog(Base):
         Integer, ForeignKey("job_applications.id"), nullable=False
     )
     email_log_id = Column(Integer, ForeignKey("email_logs.id"), nullable=False)
+    bulk_job_application_email_send_id = Column(
+        Integer,
+        ForeignKey("bulk_job_application_email_sends.id"),
+        nullable=True,
+    )
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -140,6 +162,7 @@ class BulkJobApplicationEmailSend(Base):
         default=BulkJobApplicationEmailSendStatus.PENDING.value,
         nullable=False,
     )
+    min_similarity_score = Column(Float, nullable=True)
     meta_data = Column(JSON, default=dict, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

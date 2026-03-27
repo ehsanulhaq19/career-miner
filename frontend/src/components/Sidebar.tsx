@@ -14,6 +14,7 @@ import {
   HiOutlineDocumentText,
   HiOutlineArrowRightOnRectangle,
   HiOutlinePaperAirplane,
+  HiOutlineRectangleStack,
 } from "react-icons/hi2";
 import { useAppDispatch } from "@/store/store";
 import { logoutUser } from "@/store/slices/authSlice";
@@ -27,6 +28,7 @@ const navItems = [
   { label: "Clients", href: "/clients", icon: HiOutlineUserGroup },
   { label: "Resumes", href: "/resumes", icon: HiOutlineDocumentText },
   { label: "Job Applications", href: "/job-applications", icon: HiOutlinePaperAirplane },
+  { label: "Workflows", href: "/workflow", icon: HiOutlineRectangleStack },
   { label: "Email Logs", href: "/email-logs", icon: HiOutlineEnvelope },
   { label: "Profile", href: "/profile", icon: HiOutlineUser },
 ];

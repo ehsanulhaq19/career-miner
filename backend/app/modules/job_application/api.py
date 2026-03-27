@@ -193,11 +193,12 @@ async def bulk_send_job_application_emails_endpoint(
         db,
         job_application_ids=request.job_application_ids,
         user_id=current_user.id,
+        min_similarity_score=request.min_similarity_score,
     )
     background_tasks.add_task(
         run_bulk_job_application_email_background,
         result["id"],
-        request.job_application_ids,
+        result["job_application_ids"],
         current_user.id,
     )
     return {"id": result["id"], "status": result["status"]}

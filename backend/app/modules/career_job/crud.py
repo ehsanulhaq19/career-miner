@@ -4,7 +4,7 @@ from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.models import CareerClient
-from app.modules.career_job.models import CareerJob, CareerJobUser
+from app.modules.career_job.models import CareerJob, CareerJobScrapJobLink, CareerJobUser
 from app.modules.job_application.models import JobApplication
 from app.modules.job_site.models import JobSite
 from app.modules.scrap_job.models import ScrapJob
@@ -234,7 +234,45 @@ async def create_career_job(db: AsyncSession, data: dict) -> CareerJob:
     db.add(career_job)
     await db.flush()
     await db.refresh(career_job)
+    if career_job.scrap_job_id:
+        db.add(
+            CareerJobScrapJobLink(
+                career_job_id=career_job.id,
+                scrap_job_id=career_job.scrap_job_id,
+            )
+        )
+        await db.flush()
     return career_job
+
+
+async def get_career_job_ids_by_scrap_job_id(
+    db: AsyncSession,
+    scrap_job_id: int,
+) -> list[int]:
+    """Return career job ids created under the given scrap job."""
+    result = await db.execute(
+        select(CareerJob.id).where(CareerJob.scrap_job_id == scrap_job_id)
+    )
+    return [row[0] for row in result.all()]
+
+
+async def get_career_client_ids_for_career_jobs(
+    db: AsyncSession,
+    career_job_ids: list[int],
+) -> list[int]:
+    """Return distinct career client ids referenced by the given career jobs."""
+    if not career_job_ids:
+        return []
+    result = await db.execute(
+        select(CareerJob.career_client_id)
+        .where(CareerJob.id.in_(career_job_ids))
+        .where(CareerJob.career_client_id.isnot(None))
+    )
+    return list(
+        dict.fromkeys(
+            row[0] for row in result.all() if row[0] is not None
+        )
+    )
 
 
 async def check_duplicate_job(

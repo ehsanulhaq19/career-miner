@@ -6,6 +6,7 @@ from app.modules.career_client.models import (
     BulkCareerClientEmailSendLog,
     CareerClient,
     CareerClientEmailLog,
+    CareerClientScrapClientJobLink,
 )
 
 
@@ -143,6 +144,24 @@ async def create_career_client(db: AsyncSession, data: dict) -> CareerClient:
     return career_client
 
 
+async def record_career_client_scrap_client_job_link(
+    db: AsyncSession,
+    career_client_id: int,
+    scrap_client_job_id: int,
+) -> CareerClientScrapClientJobLink:
+    """
+    Append a pivot row linking a career client to a scrap client job without removing history.
+    """
+    row = CareerClientScrapClientJobLink(
+        career_client_id=career_client_id,
+        scrap_client_job_id=scrap_client_job_id,
+    )
+    db.add(row)
+    await db.flush()
+    await db.refresh(row)
+    return row
+
+
 async def update_career_client(
     db: AsyncSession,
     career_client_id: int,
@@ -156,6 +175,12 @@ async def update_career_client(
         if hasattr(client, key):
             setattr(client, key, value)
     await db.flush()
+    if "scrap_client_job_id" in data and data.get("scrap_client_job_id") is not None:
+        await record_career_client_scrap_client_job_link(
+            db,
+            career_client_id,
+            int(data["scrap_client_job_id"]),
+        )
     await db.refresh(client)
     return client
 
@@ -177,6 +202,8 @@ async def assign_scrap_client_job_to_career_clients(
         .values(scrap_client_job_id=scrap_client_job_id)
     )
     await db.flush()
+    for cid in unique_ids:
+        await record_career_client_scrap_client_job_link(db, cid, scrap_client_job_id)
 
 
 async def get_career_clients_without_emails(

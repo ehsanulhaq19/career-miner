@@ -18,12 +18,14 @@ from app.modules.job_application.crud import (
     create_bulk_job_application_email_send_log,
     create_job_application,
     create_job_application_email_log,
+    record_job_application_bulk_job_application_link,
     get_bulk_job_application_by_id,
     get_bulk_job_application_logs_by_id,
     get_bulk_job_application_email_send_by_id,
     get_bulk_job_application_email_send_logs as crud_get_bulk_email_send_logs,
     get_email_logs_for_job_application,
     get_email_send_count_for_job_application,
+    filter_job_application_ids_by_min_similarity,
     get_job_application_by_id,
     get_job_applications,
     get_job_applications_by_date_and_similarity,
@@ -565,7 +567,10 @@ async def get_job_application_file_path(
 
 
 async def send_job_application_email(
-    db: AsyncSession, job_application_id: int, user_id: int
+    db: AsyncSession,
+    job_application_id: int,
+    user_id: int,
+    bulk_job_application_email_send_id: int | None = None,
 ) -> JobApplicationResponse:
     """
     Send emails for a job application to each to_email address.
@@ -604,7 +609,10 @@ async def send_job_application_email(
             )
             if result.get("email_log_id"):
                 await create_job_application_email_log(
-                    db, job_application_id, result["email_log_id"]
+                    db,
+                    job_application_id,
+                    result["email_log_id"],
+                    bulk_job_application_email_send_id=bulk_job_application_email_send_id,
                 )
         except Exception:
             all_success = False
@@ -710,26 +718,53 @@ async def start_bulk_job_application_email_send(
     db: AsyncSession,
     job_application_ids: list[int],
     user_id: int,
+    min_similarity_score: float | None = None,
 ) -> dict:
     """
     Create a bulk job application email send record and return it.
     Actual processing runs in background.
+
+    When ``min_similarity_score`` is set, only applications with
+    ``similarity_score >= min_similarity_score`` (non-null) are included.
     """
-    from datetime import datetime, timezone
+    if not job_application_ids:
+        raise BadRequestException(detail="No job applications selected")
+
+    to_send = list(job_application_ids)
+    if min_similarity_score is not None:
+        to_send = await filter_job_application_ids_by_min_similarity(
+            db,
+            job_application_ids,
+            user_id,
+            min_similarity_score,
+        )
+        if not to_send:
+            raise BadRequestException(
+                detail="No job applications meet the minimum similarity score"
+            )
 
     meta_data = {
-        "job_application_ids": job_application_ids,
-        "total": len(job_application_ids),
+        "job_application_ids": to_send,
+        "total": len(to_send),
+        "requested_job_application_ids": job_application_ids,
     }
+    if min_similarity_score is not None:
+        meta_data["min_similarity_score"] = min_similarity_score
+
     bulk = await create_bulk_job_application_email_send(
         db,
         {
             "user_id": user_id,
             "status": BulkJobApplicationEmailSendStatus.PENDING.value,
+            "min_similarity_score": min_similarity_score,
             "meta_data": meta_data,
         },
     )
-    return {"id": bulk.id, "status": bulk.status}
+    return {
+        "id": bulk.id,
+        "status": bulk.status,
+        "job_application_ids": to_send,
+    }
 
 
 async def run_bulk_job_application_email_background(
@@ -788,7 +823,10 @@ async def run_bulk_job_application_email_background(
                     await asyncio.sleep(random.randint(1, 3))
                     async with async_session() as app_db:
                         await send_job_application_email(
-                            app_db, job_application_id, user_id
+                            app_db,
+                            job_application_id,
+                            user_id,
+                            bulk_job_application_email_send_id=bulk_id,
                         )
                         await app_db.commit()
                     success_count += 1

@@ -7,6 +7,7 @@ from app.modules.websocket.constants.socket_message_types import (
     CLIENT_EMAIL_VALIDATION_COMPLETED,
     CLIENT_EMAIL_VALIDATION_ERROR,
     CLIENT_EMAIL_VALIDATION_PROGRESS,
+    WORKFLOW_EVENT,
     SCRAP_CLIENT_COMPLETED,
     SCRAP_CLIENT_ERROR,
     SCRAP_CLIENT_IN_PROGRESS,
@@ -34,6 +35,7 @@ BULK_CAREER_CLIENT_EMAIL_SEND_CHANNEL_PREFIX = (
     "/ws/bulk_career_client_email/"
 )
 CLIENT_EMAIL_VALIDATION_CHANNEL_PREFIX = "/ws/client_email_validation/"
+WORKFLOW_CHANNEL_PREFIX = "/ws/workflow/"
 
 
 def _scrap_job_log_data(log: dict) -> dict:
@@ -255,6 +257,14 @@ async def broadcast_client_email_validation_progress(
     await connection_manager.send_to_channel(
         channel, CLIENT_EMAIL_VALIDATION_PROGRESS, data
     )
+
+
+async def broadcast_workflow_event(user_id: int, data: dict) -> None:
+    """
+    Broadcast workflow execution progress to the user's workflow channel.
+    """
+    channel = f"{WORKFLOW_CHANNEL_PREFIX}{user_id}"
+    await connection_manager.send_to_channel(channel, WORKFLOW_EVENT, data)
 
 
 async def broadcast_client_email_validation_completed(

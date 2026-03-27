@@ -3,6 +3,19 @@ from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text
 from app.database import Base
 
 
+class CareerJobScrapJobLink(Base):
+    """
+    SQLAlchemy pivot preserving each association between a career job and a scrap job.
+    """
+
+    __tablename__ = "career_job_scrap_job_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    career_job_id = Column(Integer, ForeignKey("career_jobs.id"), nullable=False)
+    scrap_job_id = Column(Integer, ForeignKey("scrap_jobs.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class CareerJobUser(Base):
     """SQLAlchemy model representing a user's seen status for a career job."""
 

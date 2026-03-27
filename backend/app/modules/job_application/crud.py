@@ -11,8 +11,27 @@ from app.modules.job_application.models import (
     BulkJobApplicationEmailSendStatus,
     BulkJobApplicationStatus,
     JobApplication,
+    JobApplicationBulkJobApplicationLink,
     JobApplicationEmailLog,
 )
+
+
+async def record_job_application_bulk_job_application_link(
+    db: AsyncSession,
+    job_application_id: int,
+    bulk_job_application_id: int,
+) -> JobApplicationBulkJobApplicationLink:
+    """
+    Append a pivot row linking a job application to a bulk job application run.
+    """
+    row = JobApplicationBulkJobApplicationLink(
+        job_application_id=job_application_id,
+        bulk_job_application_id=bulk_job_application_id,
+    )
+    db.add(row)
+    await db.flush()
+    await db.refresh(row)
+    return row
 
 
 async def create_job_application(db: AsyncSession, data: dict) -> JobApplication:
@@ -68,6 +87,25 @@ async def get_job_application_by_id(
         .where(JobApplication.user_id == user_id)
     )
     return result.scalars().first()
+
+
+async def get_job_application_ids_for_user_by_career_jobs(
+    db: AsyncSession,
+    user_id: int,
+    career_job_ids: list[int],
+) -> list[int]:
+    """
+    Return job application ids for the user tied to the given career jobs.
+    """
+    if not career_job_ids:
+        return []
+    result = await db.execute(
+        select(JobApplication.id)
+        .where(JobApplication.user_id == user_id)
+        .where(JobApplication.career_job_id.in_(career_job_ids))
+        .order_by(JobApplication.id.desc())
+    )
+    return [row[0] for row in result.all()]
 
 
 async def get_active_job_applications_count_by_similarity(
@@ -275,6 +313,7 @@ async def create_job_application_email_log(
     db: AsyncSession,
     job_application_id: int,
     email_log_id: int,
+    bulk_job_application_email_send_id: int | None = None,
 ) -> JobApplicationEmailLog:
     """
     Create a pivot record linking a job application to an email log.
@@ -282,6 +321,7 @@ async def create_job_application_email_log(
     record = JobApplicationEmailLog(
         job_application_id=job_application_id,
         email_log_id=email_log_id,
+        bulk_job_application_email_send_id=bulk_job_application_email_send_id,
     )
     db.add(record)
     await db.flush()
@@ -325,6 +365,31 @@ async def get_email_logs_for_job_application(
         .order_by(EmailLog.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def filter_job_application_ids_by_min_similarity(
+    db: AsyncSession,
+    job_application_ids: list[int],
+    user_id: int,
+    min_similarity_score: float,
+) -> list[int]:
+    """
+    Keep IDs in the same order as ``job_application_ids`` that belong to the user
+    and have similarity_score >= min_similarity_score (NULL scores excluded).
+    dedupe first would change behavior — caller passes list as intended.
+    """
+    if not job_application_ids:
+        return []
+    result = await db.execute(
+        select(JobApplication.id).where(
+            JobApplication.id.in_(job_application_ids),
+            JobApplication.user_id == user_id,
+            JobApplication.similarity_score.isnot(None),
+            JobApplication.similarity_score >= min_similarity_score,
+        )
+    )
+    allowed = {row[0] for row in result.all()}
+    return [jid for jid in job_application_ids if jid in allowed]
 
 
 async def create_bulk_job_application_email_send(

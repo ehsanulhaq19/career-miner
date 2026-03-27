@@ -15,8 +15,13 @@ from app.modules.career_client.models import (  # noqa: F401
     BulkCareerClientEmailSendLog,
     CareerClient,
     CareerClientEmailLog,
+    CareerClientScrapClientJobLink,
 )
-from app.modules.career_job.models import CareerJob, CareerJobUser  # noqa: F401
+from app.modules.career_job.models import (  # noqa: F401
+    CareerJob,
+    CareerJobScrapJobLink,
+    CareerJobUser,
+)
 from app.modules.scrap_job.models import ScrapJob  # noqa: F401
 from app.modules.resume.models import Resume  # noqa: F401
 from app.modules.email.models import EmailLog  # noqa: F401
@@ -26,9 +31,17 @@ from app.modules.job_application.models import (  # noqa: F401
     BulkJobApplicationEmailSendLog,
     BulkJobApplicationLog,
     JobApplication,
+    JobApplicationBulkJobApplicationLink,
     JobApplicationEmailLog,
 )
 from app.modules.scrap_client.models import ScrapClientJob, ScrapClientLog  # noqa: F401
+from app.modules.workflow.models import (  # noqa: F401
+    Workflow,
+    WorkflowExecution,
+    WorkflowJob,
+    WorkflowLog,
+    WorkflowTask,
+)
 
 settings = get_settings()
 

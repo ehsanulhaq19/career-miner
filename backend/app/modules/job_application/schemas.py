@@ -21,6 +21,12 @@ class BulkJobApplicationEmailSendRequest(BaseModel):
     """Schema for bulk job application email send request."""
 
     job_application_ids: list[int]
+    min_similarity_score: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="If set, only send for applications with similarity_score >= this value (0–100).",
+    )
 
 
 class JobApplicationUpdate(BaseModel):

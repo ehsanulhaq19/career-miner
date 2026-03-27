@@ -14,6 +14,7 @@ import bulkJobApplicationReducer from "./slices/bulkJobApplicationSlice";
 import bulkEmailSendReducer from "./slices/bulkEmailSendSlice";
 import bulkCareerClientEmailReducer from "./slices/bulkCareerClientEmailSlice";
 import clientEmailValidationReducer from "./slices/clientEmailValidationSlice";
+import workflowReducer from "./slices/workflowSlice";
 
 export const store = configureStore({
   reducer: {
@@ -31,6 +32,7 @@ export const store = configureStore({
     bulkEmailSend: bulkEmailSendReducer,
     bulkCareerClientEmail: bulkCareerClientEmailReducer,
     clientEmailValidation: clientEmailValidationReducer,
+    workflow: workflowReducer,
   },
 });
 

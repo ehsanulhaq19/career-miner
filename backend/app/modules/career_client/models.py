@@ -30,6 +30,21 @@ class ClientSite(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class CareerClientScrapClientJobLink(Base):
+    """
+    SQLAlchemy pivot preserving each association between a career client and a scrap client job.
+    """
+
+    __tablename__ = "career_client_scrap_client_job_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    career_client_id = Column(Integer, ForeignKey("career_clients.id"), nullable=False)
+    scrap_client_job_id = Column(
+        Integer, ForeignKey("scrap_client_jobs.id"), nullable=False
+    )
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class CareerClient(Base):
     """SQLAlchemy model representing a company/client extracted from job listings."""
 

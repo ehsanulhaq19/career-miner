@@ -34,6 +34,16 @@ async def scraping_cron_job() -> None:
             logger.exception("Scraping cron job encountered an error")
 
 
+async def workflow_cron_job() -> None:
+    """Dispatch due workflow runs on schedule."""
+    try:
+        from app.modules.workflow.service import tick_due_workflows
+
+        await tick_due_workflows()
+    except Exception:
+        logger.exception("Workflow cron job encountered an error")
+
+
 async def _terminate_timed_out_jobs(db) -> None:
     """Find and terminate scrap jobs that exceeded the maximum execution time."""
     timed_out_jobs = await get_timed_out_scrap_jobs(
@@ -88,6 +98,13 @@ def start_scheduler() -> None:
             "interval",
             minutes=1,
             id="scraping_cron",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            workflow_cron_job,
+            "interval",
+            minutes=1,
+            id="workflow_cron",
             replace_existing=True,
         )
         scheduler.start()

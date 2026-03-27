@@ -22,6 +22,7 @@ import {
   BULK_JOB_APPLICATION_LOG,
   BULK_CAREER_CLIENT_EMAIL_SEND_LOG,
   BULK_JOB_APPLICATION_EMAIL_SEND_LOG,
+  WORKFLOW_EVENT,
   SCRAP_JOB_PENDING,
   SCRAP_JOB_IN_PROGRESS,
   SCRAP_JOB_COMPLETED,
@@ -104,6 +105,13 @@ function getClientEmailValidationWebSocketUrl(userId: number): string {
   return `${wsBase}/ws/client_email_validation/${userId}?token=${encodeURIComponent(token || "")}`;
 }
 
+function getWorkflowWebSocketUrl(userId: number): string {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+  const wsBase = baseUrl.replace(/^http/, "ws").replace("/api", "");
+  const token = Cookies.get("token");
+  return `${wsBase}/ws/workflow/${userId}?token=${encodeURIComponent(token || "")}`;
+}
+
 export default function WebSocketProvider({
   children,
 }: {
@@ -117,6 +125,7 @@ export default function WebSocketProvider({
   const bulkEmailSendWsRef = useRef<WebSocket | null>(null);
   const bulkCareerClientEmailWsRef = useRef<WebSocket | null>(null);
   const clientEmailValidationWsRef = useRef<WebSocket | null>(null);
+  const workflowWsRef = useRef<WebSocket | null>(null);
   const scrapJobReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapClientReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const bulkJobApplicationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
@@ -124,16 +133,44 @@ export default function WebSocketProvider({
   const bulkCareerClientEmailReconnectRef =
     useRef<ReturnType<typeof setTimeout>>();
   const clientEmailValidationReconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const workflowReconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const scrapJobAttemptsRef = useRef(0);
   const scrapClientAttemptsRef = useRef(0);
   const bulkJobApplicationAttemptsRef = useRef(0);
   const bulkEmailSendAttemptsRef = useRef(0);
   const bulkCareerClientEmailAttemptsRef = useRef(0);
+  const workflowAttemptsRef = useRef(0);
 
   useEffect(() => {
     if (!user?.id || !token) return;
 
     let clientEmailValidationReconnectAttempts = 0;
+
+    const connectWorkflow = () => {
+      const ws = new WebSocket(getWorkflowWebSocketUrl(user.id));
+      workflowWsRef.current = ws;
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          const { type, data } = message;
+          if (type !== WORKFLOW_EVENT || !data) return;
+          if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+            console.debug("workflow socket", data);
+          }
+        } catch {
+          return;
+        }
+      };
+      ws.onclose = () => {
+        workflowWsRef.current = null;
+        const delay = Math.min(1000 * 2 ** workflowAttemptsRef.current, 30000);
+        workflowAttemptsRef.current += 1;
+        workflowReconnectRef.current = setTimeout(connectWorkflow, delay);
+      };
+      ws.onopen = () => {
+        workflowAttemptsRef.current = 0;
+      };
+    };
 
     const connectScrapJob = () => {
       const ws = new WebSocket(getScrapJobWebSocketUrl(user.id));
@@ -432,6 +469,7 @@ export default function WebSocketProvider({
     connectBulkEmailSend();
     connectBulkCareerClientEmail();
     connectClientEmailValidation();
+    connectWorkflow();
 
     return () => {
       if (scrapJobReconnectRef.current) {
@@ -451,6 +489,9 @@ export default function WebSocketProvider({
       }
       if (clientEmailValidationReconnectRef.current) {
         clearTimeout(clientEmailValidationReconnectRef.current);
+      }
+      if (workflowReconnectRef.current) {
+        clearTimeout(workflowReconnectRef.current);
       }
       if (bulkJobApplicationWsRef.current) {
         bulkJobApplicationWsRef.current.close();
@@ -475,6 +516,10 @@ export default function WebSocketProvider({
       if (clientEmailValidationWsRef.current) {
         clientEmailValidationWsRef.current.close();
         clientEmailValidationWsRef.current = null;
+      }
+      if (workflowWsRef.current) {
+        workflowWsRef.current.close();
+        workflowWsRef.current = null;
       }
     };
   }, [user?.id, token, dispatch]);
