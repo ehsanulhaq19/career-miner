@@ -1,16 +1,17 @@
 import asyncio
 import json
 import logging
-import random
 import re
+import uuid
 from collections import deque
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.modules.career_client.crud import get_or_create_career_client
 from app.modules.career_job.crud import (
     check_job_exist,
@@ -18,7 +19,9 @@ from app.modules.career_job.crud import (
 )
 from app.modules.llm.service import LLMFactory
 from app.modules.job_site.models import JobSite
+from app.modules.scrap_client.crud import create_scrap_client_file_link
 from app.modules.scrap_job.crud import (
+    create_scrap_job_file_link,
     get_scrap_job_by_id,
     update_scrap_job_meta_data,
     update_scrap_job_status,
@@ -30,9 +33,61 @@ from app.modules.scraper.prompts import (
     JOB_PARSER_USER_PROMPT_TEMPLATE,
 )
 from app.modules.scrap_job.service import create_log_and_broadcast
+from app.modules.scraper.crud import create_scrapper
+from app.modules.scraper.scrape_core import ScrapeCore
 from app.modules.websocket.service import broadcast_scrap_job_status
 
 logger = logging.getLogger(__name__)
+
+
+class ScraperHtmlStorage:
+    """Writes scraped HTML to configured storage and links Scrapper rows to jobs."""
+
+    @staticmethod
+    async def persist_for_scrap_job(
+        db: AsyncSession,
+        scrap_job_id: int,
+        html: str,
+        source_url: str,
+    ) -> None:
+        """
+        Save HTML under SCRAP_HTML_OUTPUT_FOLDER/scrap_job_{id}/, create Scrapper,
+        and link via ScrapJobFile.
+        """
+        settings = get_settings()
+        base = Path(settings.SCRAP_HTML_OUTPUT_FOLDER).resolve()
+        base.mkdir(parents=True, exist_ok=True)
+        sub = base / f"scrap_job_{scrap_job_id}"
+        sub.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.html"
+        full_path = sub / filename
+        full_path.write_text(html, encoding="utf-8")
+        relative = str(full_path.relative_to(base))
+        scrapper = await create_scrapper(db, relative, source_url)
+        await create_scrap_job_file_link(db, scrap_job_id, scrapper.id)
+
+    @staticmethod
+    async def persist_for_scrap_client_job(
+        db: AsyncSession,
+        scrap_client_job_id: int,
+        html: str,
+        source_url: str,
+    ) -> None:
+        """
+        Save HTML under SCRAP_HTML_OUTPUT_FOLDER/scrap_client_{id}/, create Scrapper,
+        and link via ScrapClientFile.
+        """
+        settings = get_settings()
+        base = Path(settings.SCRAP_HTML_OUTPUT_FOLDER).resolve()
+        base.mkdir(parents=True, exist_ok=True)
+        sub = base / f"scrap_client_{scrap_client_job_id}"
+        sub.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.html"
+        full_path = sub / filename
+        full_path.write_text(html, encoding="utf-8")
+        relative = str(full_path.relative_to(base))
+        scrapper = await create_scrapper(db, relative, source_url)
+        await create_scrap_client_file_link(db, scrap_client_job_id, scrapper.id)
 
 def _extract_json_array(text: str) -> str | None:
     """Extract JSON array from LLM response, handling markdown code blocks."""
@@ -68,23 +123,12 @@ JOB_LISTING_KEYWORDS = [
     "role",
 ]
 
-# Sites known to block simple HTTP clients; use Playwright by default for these.
-# Includes international variants (e.g. indeed.co.uk, indeed.de).
-ANTI_BOT_DOMAIN_PATTERNS = ("indeed.", "glassdoor.", "monster.", "ziprecruiter.")
-
-# Rotating User-Agents to reduce fingerprinting and 403 blocks.
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-]
-
 
 class ScraperService:
     """Handles fetching, parsing, and persisting scraped job listings from external sites."""
+
+    def __init__(self) -> None:
+        self._core = ScrapeCore()
 
     async def scrape_job_site(
         self,
@@ -126,7 +170,7 @@ class ScraperService:
             all_jobs_by_key: dict[tuple[str, str], dict] = {}
             base_domain = urlparse(job_site.url).netloc
             to_visit: deque[tuple[str, int]] = deque([(job_site.url, 0)])
-            queued.add(self._normalize_url(job_site.url))
+            queued.add(self._core.normalize_url(job_site.url))
             saved_count = 0
             pages_scraped = 0
             total_jobs_scraped_from_html = 0
@@ -144,12 +188,12 @@ class ScraperService:
             client_kwargs: dict = {
                 "timeout": 30,
                 "follow_redirects": True,
-                "headers": self._browser_headers(job_site.url),
+                "headers": self._core.browser_headers(job_site.url),
             }
             if settings.SCRAP_HTTP_PROXY:
                 client_kwargs["proxy"] = settings.SCRAP_HTTP_PROXY
             async with httpx.AsyncClient(**client_kwargs) as client:
-                await self._warm_up_session(client, job_site.url)
+                await self._core.warm_up_session(client, job_site.url)
                 while to_visit and pages_scraped < effective_max_pages:
                     refreshed = await get_scrap_job_by_id(db, scrap_job.id)
                     if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
@@ -157,7 +201,7 @@ class ScraperService:
                         break
 
                     url, current_depth = to_visit.popleft()
-                    url_normalized = self._normalize_url(url)
+                    url_normalized = self._core.normalize_url(url)
                     if url_normalized in visited:
                         continue
                     visited.add(url_normalized)
@@ -173,14 +217,13 @@ class ScraperService:
                     )
                     try:
                         if load_more_on_scroll:
-                            html, final_url = await self._fetch_page_with_scroll(
+                            html, final_url = await self._core.fetch_page_with_scroll(
                                 url, max_scroll=max_scroll
                             )
-                        elif self._is_anti_bot_site(url):
-                            html, final_url = await self._fetch_page_playwright(url)
+                        elif self._core.is_anti_bot_site(url):
+                            html, final_url = await self._core.fetch_page_playwright(url)
                         else:
-                            html, final_url = await self._fetch_page(client, url)
-                            
+                            html, final_url = await self._core.fetch_page(client, url)
                     except Exception as e:
                         logger.warning("Failed to fetch %s: %s", url, e)
                         await create_log_and_broadcast(
@@ -193,6 +236,17 @@ class ScraperService:
                             meta_data={"url": url, "page_index": pages_scraped},
                         )
                         continue
+
+                    try:
+                        await ScraperHtmlStorage.persist_for_scrap_job(
+                            db, scrap_job.id, html, final_url
+                        )
+                    except Exception as persist_exc:
+                        logger.warning(
+                            "Failed to persist scrap HTML for job %s: %s",
+                            scrap_job.id,
+                            persist_exc,
+                        )
 
                     await create_log_and_broadcast(
                         db,
@@ -250,7 +304,7 @@ class ScraperService:
                             continue
                         links_list = job_data.get("links") or []
                         primary_link = links_list[0] if links_list else final_url
-                        norm_link = self._normalize_url(primary_link) if primary_link else ""
+                        norm_link = self._core.normalize_url(primary_link) if primary_link else ""
                         dedupe_key = (job_data["title"], norm_link)
                         all_jobs_by_key[dedupe_key] = job_data
                         validated_jobs.append(job_data)
@@ -284,7 +338,7 @@ class ScraperService:
                     next_depth = current_depth + 1
                     can_follow_links = depth_levels is None or next_depth <= depth_levels
                     for link in crawlable_links:
-                        normalized = self._normalize_url(link)
+                        normalized = self._core.normalize_url(link)
                         if normalized not in visited and normalized not in queued and can_follow_links:
                             to_visit.append((link, next_depth))
                             queued.add(normalized)
@@ -300,7 +354,7 @@ class ScraperService:
                     )
 
                     pages_scraped += 1
-                    delay = self._random_delay(settings)
+                    delay = self._core.random_delay(settings)
                     if delay > 0:
                         await asyncio.sleep(delay)
 
@@ -609,6 +663,21 @@ class ScraperService:
                 unique.append(el)
         return unique
 
+    def _title_from_job_href(self, href: str) -> str:
+        """
+        Build a readable title from a job detail URL path when the anchor has no text
+        (e.g. listing cards that only expose the title in h2 or aria-label).
+        """
+        path = (href or "").strip().split("?")[0].rstrip("/")
+        if not path:
+            return ""
+        segment = path.split("/")[-1]
+        if not segment:
+            return ""
+        segment = re.sub(r"-\d{5,}$", "", segment)
+        segment = re.sub(r"[_-]+", " ", segment).strip()
+        return segment[:500] if segment else ""
+
     def _parse_job_element(self, element: Tag, base_url: str) -> dict | None:
         """
         Extract structured job data from a single HTML element.
@@ -622,30 +691,67 @@ class ScraperService:
         description = None
         company_emails: list[str] = []
 
-        heading = element.find(["h1", "h2", "h3", "h4", "a"])
-        if heading:
+        heading = None
+        for name in ("h1", "h2", "h3", "h4"):
+            h = element.find(name)
+            if h is not None and h.get_text(strip=True):
+                heading = h
+                break
+        if heading is None:
+            for a in element.find_all("a", href=True):
+                aria = (a.get("aria-label") or "").strip()
+                tit_a = (a.get("title") or "").strip()
+                txt = a.get_text(strip=True)
+                if txt or aria or tit_a:
+                    heading = a
+                    break
+        if heading is None:
+            job_path_markers = ("/jobs/", "/job/", "stellen", "vacancy", "career", "position")
+            for a in element.find_all("a", href=True):
+                raw_h = str(a.get("href", "")).strip().lower()
+                if raw_h.startswith("#"):
+                    continue
+                if any(m in raw_h for m in job_path_markers):
+                    heading = a
+                    break
+        if heading is None:
+            return None
+
+        if heading.name in ("h1", "h2", "h3", "h4"):
             title = heading.get_text(strip=True)
-            if heading.name == "a" and heading.get("href"):
-                href = heading["href"]
-                full_url = urljoin(base_url, href)
+        else:
+            title = (
+                heading.get_text(strip=True)
+                or (heading.get("aria-label") or "").strip()
+                or (heading.get("title") or "").strip()
+            )
+            if not title and heading.get("href"):
+                title = self._title_from_job_href(str(heading["href"]))
+
+        if heading.name == "a" and heading.get("href"):
+            href = heading["href"]
+            full_url = urljoin(base_url, href)
+            if full_url.startswith(("http://", "https://")):
+                links.append(full_url)
+        elif heading.name in ("h1", "h2", "h3", "h4"):
+            link = heading.find("a")
+            if link and link.get("href"):
+                full_url = urljoin(base_url, link["href"])
                 if full_url.startswith(("http://", "https://")):
                     links.append(full_url)
-            else:
-                link = heading.find("a")
-                if link and link.get("href"):
-                    full_url = urljoin(base_url, link["href"])
-                    if full_url.startswith(("http://", "https://")):
-                        links.append(full_url)
 
         for tag in element.find_all("a", href=True):
-            href = str(tag.get("href", "")).lower()
-            if href.startswith("mailto:"):
-                email = href.replace("mailto:", "").split("?")[0].strip()
+            raw = str(tag.get("href", "")).strip()
+            if not raw or raw.startswith("#") or raw.lower().startswith("javascript:"):
+                continue
+            low = raw.lower()
+            if low.startswith("mailto:"):
+                email = raw.replace("mailto:", "").split("?")[0].strip()
                 if email and email not in company_emails:
                     company_emails.append(email)
-            elif href.startswith(("http://", "https://")):
-                full_url = urljoin(base_url, tag["href"])
-                if full_url not in links:
+            else:
+                full_url = urljoin(base_url, raw)
+                if full_url.startswith(("http://", "https://")) and full_url not in links:
                     links.append(full_url)
 
         if not title:
@@ -693,34 +799,44 @@ class ScraperService:
         """
         jobs: list[dict] = []
         for link in soup.find_all("a", href=True):
-            text = link.get_text(strip=True)
-            href = str(link["href"]).lower()
-            if not text or len(text) < 5:
+            raw_href = str(link.get("href", "")).strip()
+            low = raw_href.lower()
+            if not raw_href or low.startswith("#") or low.startswith("javascript:"):
                 continue
-            if any(kw in href for kw in JOB_LISTING_KEYWORDS):
-                job_url = urljoin(base_url, link["href"])
-                if not job_url.startswith(("http://", "https://")):
-                    continue
-                description = text if len(text) >= 100 else None
-                if not description:
-                    continue
-                jobs.append(
-                    {
-                        "title": text[:500],
-                        "links": [job_url],
-                        "description": description,
-                    }
-                )
+            if not any(kw in low for kw in JOB_LISTING_KEYWORDS):
+                continue
+            text = link.get_text(strip=True)
+            aria = (link.get("aria-label") or "").strip()
+            tit = (link.get("title") or "").strip()
+            title = text or aria or tit
+            if not title:
+                title = self._title_from_job_href(raw_href)
+            if not title or len(title) < 3:
+                continue
+            job_url = urljoin(base_url, link["href"])
+            if not job_url.startswith(("http://", "https://")):
+                continue
+            description = None
+            if len(text) >= 100:
+                description = text
+            elif len(aria) >= 100:
+                description = aria
+            else:
+                parent = link.find_parent(["article", "li", "div", "section"])
+                if parent is not None:
+                    blob = parent.get_text(separator=" ", strip=True)
+                    if blob and len(blob) >= 100:
+                        description = blob
+            if not description or len(description.strip()) < 100:
+                continue
+            jobs.append(
+                {
+                    "title": title[:500],
+                    "links": [job_url],
+                    "description": description,
+                }
+            )
         return jobs
-
-    def _normalize_url(self, url: str) -> str:
-        """Normalize URL for deduplication (strip fragment, trailing slash)."""
-        parsed = urlparse(url)
-        path = parsed.path.rstrip("/") or "/"
-        normalized = f"{parsed.scheme}://{parsed.netloc}{path}"
-        if parsed.query:
-            normalized += "?" + parsed.query
-        return normalized
 
     def _extract_crawlable_links(
         self, html: str, base_url: str, base_domain: str
@@ -748,190 +864,8 @@ class ScraperService:
             path_lower = parsed.path.lower()
             if any(path_lower.endswith(ext) for ext in skip_extensions):
                 continue
-            norm = self._normalize_url(full_url)
+            norm = self._core.normalize_url(full_url)
             if norm not in seen:
                 seen.add(norm)
                 links.append(full_url)
         return links
-
-    def _get_random_user_agent(self) -> str:
-        """Return a random User-Agent from the pool to reduce fingerprinting."""
-        return random.choice(USER_AGENTS)
-
-    def _is_anti_bot_site(self, url: str) -> bool:
-        """Return True if the URL's domain is known to block simple HTTP clients."""
-        parsed = urlparse(url)
-        domain = (parsed.netloc or "").lower()
-        return any(pattern in domain for pattern in ANTI_BOT_DOMAIN_PATTERNS)
-
-    def _browser_headers(
-        self, referer: str | None, user_agent: str | None = None
-    ) -> dict[str, str]:
-        """Return browser-like headers to reduce bot detection."""
-        headers = {
-            "User-Agent": user_agent or self._get_random_user_agent(),
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                "image/avif,image/webp,image/apng,*/*;q=0.8"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none" if not referer else "same-origin",
-            "Sec-Fetch-User": "?1",
-            "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Cache-Control": "max-age=0",
-            "DNT": "1",
-            "Pragma": "no-cache",
-            "Priority": "u=0, i",
-        }
-        if referer:
-            parsed = urlparse(referer)
-            base = f"{parsed.scheme}://{parsed.netloc}/"
-            headers["Referer"] = base
-            headers["Origin"] = base.rstrip("/")
-        return headers
-
-    async def _warm_up_session(self, client: httpx.AsyncClient, seed_url: str) -> None:
-        """Visit homepage first to establish session cookies (helps with 403)."""
-        parsed = urlparse(seed_url)
-        homepage = f"{parsed.scheme}://{parsed.netloc}/"
-        if homepage == seed_url:
-            return
-        try:
-            headers = self._browser_headers(homepage)
-            await client.get(homepage, headers=headers)
-            await asyncio.sleep(random.uniform(1.0, 2.5))
-        except Exception as e:
-            logger.debug("Warm-up request to %s failed: %s", homepage, e)
-
-    def _random_delay(self, settings: Settings) -> float:
-        """Return a random delay between requests to avoid detection."""
-        return random.uniform(
-            settings.CRAWL_DELAY_MIN_SECONDS,
-            settings.CRAWL_DELAY_MAX_SECONDS,
-        )
-
-    async def _fetch_page(
-        self, client: httpx.AsyncClient, url: str
-    ) -> tuple[str, str]:
-        """
-        Fetch a web page and return (HTML content, final URL after redirects).
-        On 403, immediately falls back to Playwright. On 429, retries with backoff.
-        """
-        parsed = urlparse(url)
-        referer = f"{parsed.scheme}://{parsed.netloc}/"
-        max_retries = 3
-        last_error: Exception | None = None
-
-        for attempt in range(max_retries):
-            try:
-                headers = self._browser_headers(referer)
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
-                final_url = str(response.url)
-                return response.text, final_url
-            except httpx.HTTPStatusError as e:
-                last_error = e
-                if e.response.status_code == 403:
-                    logger.info("403 on %s, falling back to Playwright", url)
-                    return await self._fetch_page_playwright(url)
-                if e.response.status_code == 429 and attempt < max_retries - 1:
-                    delay = (2**attempt) + random.uniform(1.0, 2.0)
-                    logger.info(
-                        "Rate limited (429) on %s, retrying in %.1fs",
-                        url,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    raise
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    delay = (2**attempt) + random.uniform(0.5, 1.5)
-                    await asyncio.sleep(delay)
-                else:
-                    raise
-
-        if last_error:
-            raise last_error
-        raise RuntimeError("Unexpected fetch failure")
-
-    async def _fetch_page_playwright(self, url: str) -> tuple[str, str]:
-        """
-        Fetch a page using Playwright (real browser). Used for anti-bot sites
-        and as fallback when httpx gets 403.
-        """
-        from playwright.async_api import async_playwright
-
-        settings = get_settings()
-        user_agent = self._get_random_user_agent()
-        async with async_playwright() as p:
-            launch_options: dict = {"headless": True}
-            if settings.SCRAP_HTTP_PROXY:
-                launch_options["proxy"] = {"server": settings.SCRAP_HTTP_PROXY}
-            browser = await p.chromium.launch(**launch_options)
-            context = await browser.new_context(
-                user_agent=user_agent,
-                viewport={"width": 1920, "height": 1080},
-                locale="en-US",
-                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
-            )
-            page = await context.new_page()
-            try:
-                await page.goto(url, wait_until="load", timeout=30000)
-                await asyncio.sleep(random.uniform(1.5, 3.0))
-                html = await page.content()
-                final_url = page.url
-                return html, final_url
-            finally:
-                await browser.close()
-
-    async def _fetch_page_with_scroll(
-        self, url: str, max_scroll: int = 10, scroll_delay: float = 1.5
-    ) -> tuple[str, str]:
-        """
-        Fetch a page using Playwright, simulate scroll to load lazy/infinite content,
-        and return the final HTML and URL.
-        """
-        from playwright.async_api import async_playwright
-
-        settings = get_settings()
-        user_agent = self._get_random_user_agent()
-        async with async_playwright() as p:
-            launch_options: dict = {"headless": True}
-            if settings.SCRAP_HTTP_PROXY:
-                launch_options["proxy"] = {"server": settings.SCRAP_HTTP_PROXY}
-            browser = await p.chromium.launch(**launch_options)
-            context = await browser.new_context(
-                user_agent=user_agent,
-                viewport={"width": 1920, "height": 1080},
-            )
-            page = await context.new_page()
-            try:
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                prev_height = 0
-                scroll_count = 0
-                while scroll_count < max_scroll:
-                    await page.evaluate(
-                        "window.scrollTo(0, document.body.scrollHeight)"
-                    )
-                    await asyncio.sleep(scroll_delay)
-                    new_height = await page.evaluate(
-                        "document.body.scrollHeight"
-                    )
-                    if new_height == prev_height:
-                        break
-                    prev_height = new_height
-                    scroll_count += 1
-                html = await page.content()
-                final_url = page.url
-                return html, final_url
-            finally:
-                await browser.close()

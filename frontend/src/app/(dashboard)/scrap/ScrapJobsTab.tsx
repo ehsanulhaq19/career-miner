@@ -9,6 +9,7 @@ import {
   HiOutlineBeaker,
   HiOutlineChevronDown,
   HiOutlineChevronRight,
+  HiOutlineWindow,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
@@ -20,7 +21,8 @@ import {
   fetchScrapJobLogs,
 } from "@/store/slices/scrapJobSlice";
 import { fetchJobSites } from "@/store/slices/jobSiteSlice";
-import { ScrapJob, ScrapJobLog } from "@/types";
+import { scrapJobService } from "@/services/scrapJobService";
+import { ScrapJob, ScrapJobLog, ScrapperFile } from "@/types";
 
 function getStatusBadgeClass(status: string): string {
   switch (status) {
@@ -77,6 +79,12 @@ export default function ScrapJobsTab() {
     depth_levels: 0,
   });
   const [testSubmitting, setTestSubmitting] = useState(false);
+  const [pagesModalJobId, setPagesModalJobId] = useState<number | null>(null);
+  const [pagesFiles, setPagesFiles] = useState<ScrapperFile[]>([]);
+  const [pagesLoading, setPagesLoading] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewSourceUrl, setPreviewSourceUrl] = useState<string | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState<number | null>(null);
 
   useEffect(() => {
     dispatch(fetchJobSites());
@@ -151,6 +159,38 @@ export default function ScrapJobsTab() {
   const handleOpenLogs = (job: ScrapJob) => {
     setLogsModalJobId(job.id);
     dispatch(fetchScrapJobLogs(job.id));
+  };
+
+  const handleOpenPages = async (job: ScrapJob) => {
+    setPagesModalJobId(job.id);
+    setPagesLoading(true);
+    setPagesFiles([]);
+    setPreviewHtml(null);
+    setPreviewSourceUrl(null);
+    try {
+      const data = await scrapJobService.getScrapJobScrappers(job.id);
+      setPagesFiles(data.items || []);
+    } catch {
+      setPagesFiles([]);
+      setToast({ type: "error", text: "Could not load scraped pages." });
+    } finally {
+      setPagesLoading(false);
+    }
+  };
+
+  const handleSelectScrapPage = async (jobId: number, f: ScrapperFile) => {
+    setPreviewLoadingId(f.id);
+    setPreviewHtml(null);
+    setPreviewSourceUrl(null);
+    try {
+      const data = await scrapJobService.getScrapJobScrapperHtml(jobId, f.id);
+      setPreviewHtml(data.html);
+      setPreviewSourceUrl(data.source_url);
+    } catch {
+      setToast({ type: "error", text: "Could not load page preview." });
+    } finally {
+      setPreviewLoadingId(null);
+    }
   };
 
   const handleTestScrapSubmit = async () => {
@@ -656,6 +696,13 @@ export default function ScrapJobsTab() {
                           <HiOutlineDocumentText className="w-4 h-4" />
                           Logs
                         </button>
+                        <button
+                          onClick={() => handleOpenPages(job)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                        >
+                          <HiOutlineWindow className="w-4 h-4" />
+                          Pages
+                        </button>
                         {(job.status === "pending" || job.status === "in_progress") && (
                           <button
                             onClick={() => handleStop(job)}
@@ -849,6 +896,110 @@ export default function ScrapJobsTab() {
                     })}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pagesModalJobId !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => {
+            setPagesModalJobId(null);
+            setPagesFiles([]);
+            setPreviewHtml(null);
+            setPreviewSourceUrl(null);
+          }}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] flex flex-col mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Scraped pages · Job #{pagesModalJobId}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setPagesModalJobId(null);
+                  setPagesFiles([]);
+                  setPreviewHtml(null);
+                  setPreviewSourceUrl(null);
+                }}
+                className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex flex-1 min-h-0 gap-0 border-b border-gray-200 dark:border-gray-800">
+              <div className="w-72 shrink-0 border-r border-gray-200 dark:border-gray-800 flex flex-col max-h-[70vh]">
+                <div className="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  Files
+                </div>
+                <div className="overflow-y-auto flex-1">
+                  {pagesLoading ? (
+                    <p className="px-3 py-4 text-sm text-gray-500">Loading…</p>
+                  ) : pagesFiles.length === 0 ? (
+                    <p className="px-3 py-4 text-sm text-gray-500">
+                      No saved pages for this job yet.
+                    </p>
+                  ) : (
+                    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {pagesFiles.map((f) => (
+                        <li key={f.id}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              pagesModalJobId !== null &&
+                              handleSelectScrapPage(pagesModalJobId, f)
+                            }
+                            disabled={previewLoadingId === f.id}
+                            className="w-full text-left px-3 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800/80 disabled:opacity-50"
+                          >
+                            <div className="truncate text-gray-900 dark:text-white font-medium">
+                              #{f.id}
+                            </div>
+                            <div className="truncate text-xs text-gray-500 mt-0.5" title={f.source_url}>
+                              {f.source_url}
+                            </div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+              <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                {previewSourceUrl && (
+                  <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-800 text-xs truncate">
+                    <a
+                      href={previewSourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary-600 dark:text-primary-400 hover:underline"
+                    >
+                      {previewSourceUrl}
+                    </a>
+                  </div>
+                )}
+                <div className="flex-1 min-h-[50vh] bg-gray-100 dark:bg-gray-950">
+                  {previewLoadingId !== null && !previewHtml ? (
+                    <p className="p-4 text-sm text-gray-500">Loading preview…</p>
+                  ) : previewHtml ? (
+                    <iframe
+                      title="HTML preview"
+                      srcDoc={previewHtml}
+                      sandbox=""
+                      className="w-full h-full min-h-[50vh] border-0 bg-white"
+                    />
+                  ) : (
+                    <p className="p-4 text-sm text-gray-500">
+                      Select a page to preview.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>

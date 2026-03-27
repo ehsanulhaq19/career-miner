@@ -503,6 +503,7 @@ async def tick_due_workflows() -> None:
     async with async_session() as db:
         due = await workflow_crud.list_due_workflows(db)
         await db.commit()
+    print("----------due--------", due)
     for wf in due:
         asyncio.create_task(execute_workflow_run(wf.id))
 

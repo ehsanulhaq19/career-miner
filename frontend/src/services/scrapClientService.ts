@@ -3,6 +3,7 @@ import {
   PaginatedResponse,
   ScrapClientJob,
   ScrapClientLog,
+  ScrapperFile,
 } from "@/types";
 
 export interface ScrapClientStatus {
@@ -101,6 +102,23 @@ export const scrapClientService = {
   async getScrapClientLogs(scrapClientJobId: number) {
     const { data } = await api.get<{ items: ScrapClientLog[] }>(
       `/scrap-clients/${scrapClientJobId}/logs`
+    );
+    return data;
+  },
+
+  async getScrapClientScrappers(scrapClientJobId: number) {
+    const { data } = await api.get<{ items: ScrapperFile[] }>(
+      `/scrap-clients/${scrapClientJobId}/scrappers`
+    );
+    return data;
+  },
+
+  async getScrapClientScrapperHtml(
+    scrapClientJobId: number,
+    scrapperId: number
+  ) {
+    const { data } = await api.get<{ source_url: string; html: string }>(
+      `/scrap-clients/${scrapClientJobId}/scrappers/${scrapperId}/html`
     );
     return data;
   },

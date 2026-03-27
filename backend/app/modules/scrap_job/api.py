@@ -16,12 +16,15 @@ from app.modules.scrap_job.schemas import (
 from app.modules.scrap_job.service import (
     get_scrap_job,
     get_scrap_job_logs,
+    get_scrapper_html_for_scrap_job,
+    list_scrappers_for_scrap_job_service,
     list_scrap_jobs,
     start_scrap_job,
     start_test_scrap_job,
     stop_scrap_job,
     resume_scrap_job,
 )
+from app.modules.scraper.schemas import ScrapperHtmlPreviewResponse, ScrapperListResponse
 from app.modules.scraper.service import ScraperService
 
 router = APIRouter()
@@ -217,3 +220,27 @@ async def get_scrap_job_logs_endpoint(
 ) -> ScrapJobLogListResponse:
     """Retrieve scrap job logs for a given scrap job."""
     return await get_scrap_job_logs(db, scrap_job_id)
+
+
+@router.get("/{scrap_job_id}/scrappers", response_model=ScrapperListResponse)
+async def list_scrap_job_scrappers_endpoint(
+    scrap_job_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ScrapperListResponse:
+    """List stored HTML pages (scrappers) associated with a scrap job."""
+    return await list_scrappers_for_scrap_job_service(db, scrap_job_id)
+
+
+@router.get(
+    "/{scrap_job_id}/scrappers/{scrapper_id}/html",
+    response_model=ScrapperHtmlPreviewResponse,
+)
+async def get_scrap_job_scrapper_html_endpoint(
+    scrap_job_id: int,
+    scrapper_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ScrapperHtmlPreviewResponse:
+    """Return raw HTML content for preview for one scrapper linked to the job."""
+    return await get_scrapper_html_for_scrap_job(db, scrap_job_id, scrapper_id)

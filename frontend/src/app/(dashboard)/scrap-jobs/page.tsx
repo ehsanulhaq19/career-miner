@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import ScrapJobsTab from "../scrap/ScrapJobsTab";
 
-export default function ScrapJobsRedirectPage() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace("/scrap?tab=jobs");
-  }, [router]);
-  return null;
+export default function ScrapJobsPage() {
+  return (
+    <div className="space-y-6">
+      <ScrapJobsTab />
+    </div>
+  );
 }

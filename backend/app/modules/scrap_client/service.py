@@ -4,10 +4,12 @@ import asyncio
 import logging
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.database import async_session
 from app.modules.career_client.crud import (
@@ -23,6 +25,8 @@ from app.modules.scrap_client.crud import (
     get_scrap_client_job_by_id,
     get_scrap_client_job_logs_by_job_id,
     get_scrap_client_jobs,
+    list_scrappers_for_scrap_client_job,
+    scrap_client_job_owns_scrapper,
     update_scrap_client_job_meta_data,
     update_scrap_client_job_status,
 )
@@ -47,11 +51,18 @@ from app.modules.scrap_client.services.email_validator import (
 )
 from app.modules.scrap_client.services.url_utils import extract_root_domain
 from app.modules.scrap_client.services.website_crawler import WebsiteCrawler
+from app.modules.scraper.service import ScraperHtmlStorage
 from app.modules.scrap_client.services.website_discovery import (
     DiscoveryResult,
     discover_company_info,
     get_domain_candidates_for_guessing,
     verify_domain_and_get_website,
+)
+from app.modules.scraper.crud import get_scrapper_by_id
+from app.modules.scraper.schemas import (
+    ScrapperHtmlPreviewResponse,
+    ScrapperListResponse,
+    ScrapperResponse,
 )
 from app.modules.websocket.service import (
     broadcast_scrap_client_log,
@@ -176,7 +187,32 @@ async def _process_single_client(
         )
         try:
             crawler = WebsiteCrawler(max_pages=15)
-            pages_data = await crawler.crawl(website)
+
+            async def on_crawl_page(page_url: str, page_html: str) -> None:
+                if scrap_client_job_id is None:
+                    return
+                try:
+                    async with async_session() as persist_db:
+                        await ScraperHtmlStorage.persist_for_scrap_client_job(
+                            persist_db,
+                            scrap_client_job_id,
+                            page_html,
+                            page_url,
+                        )
+                        await persist_db.commit()
+                except Exception as ex:
+                    logger.warning(
+                        "Could not persist email crawl HTML for job %s: %s",
+                        scrap_client_job_id,
+                        ex,
+                    )
+
+            pages_data = await crawler.crawl(
+                website,
+                on_page_html=on_crawl_page
+                if scrap_client_job_id is not None
+                else None,
+            )
             crawled_count = len(pages_data)
 
             await log_step(
@@ -1100,3 +1136,50 @@ async def get_scrap_client_status(
         else:
             counts["failed"] += cnt
     return ScrapClientStatusResponse(**counts)
+
+
+async def list_scrappers_for_scrap_client_job_service(
+    db: AsyncSession,
+    scrap_client_job_id: int,
+) -> ScrapperListResponse:
+    """Return all scrapper HTML artifacts linked to a scrap client job."""
+    client_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
+    if client_job is None:
+        raise NotFoundException(detail="Scrap client job not found")
+    rows = await list_scrappers_for_scrap_client_job(db, scrap_client_job_id)
+    return ScrapperListResponse(
+        items=[ScrapperResponse.model_validate(r) for r in rows],
+    )
+
+
+async def get_scrapper_html_for_scrap_client_job(
+    db: AsyncSession,
+    scrap_client_job_id: int,
+    scrapper_id: int,
+) -> ScrapperHtmlPreviewResponse:
+    """Load stored HTML for a scrapper row that belongs to the given scrap client job."""
+    client_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
+    if client_job is None:
+        raise NotFoundException(detail="Scrap client job not found")
+    if not await scrap_client_job_owns_scrapper(
+        db, scrap_client_job_id, scrapper_id
+    ):
+        raise NotFoundException(detail="Scrapper not found for this job")
+    scrapper = await get_scrapper_by_id(db, scrapper_id)
+    if scrapper is None:
+        raise NotFoundException(detail="Scrapper not found")
+    settings = get_settings()
+    path = Path(scrapper.file_path)
+    if not path.is_absolute():
+        path = Path(settings.SCRAP_HTML_OUTPUT_FOLDER).resolve() / scrapper.file_path
+    if not path.is_file():
+        raise NotFoundException(detail="Stored HTML file is missing")
+    max_bytes = 12 * 1024 * 1024
+    raw = path.read_bytes()
+    if len(raw) > max_bytes:
+        raw = raw[:max_bytes]
+    html = raw.decode("utf-8", errors="replace")
+    return ScrapperHtmlPreviewResponse(
+        source_url=scrapper.source_url,
+        html=html,
+    )

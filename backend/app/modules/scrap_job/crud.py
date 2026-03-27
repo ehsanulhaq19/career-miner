@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.scrap_job.models import ScrapJob, ScrapJobLog, ScrapJobStatus
+from app.modules.scrap_job.models import ScrapJob, ScrapJobFile, ScrapJobLog, ScrapJobStatus
+from app.modules.scraper.models import Scrapper
 
 
 async def get_scrap_jobs(
@@ -151,3 +152,41 @@ async def get_timed_out_scrap_jobs(db: AsyncSession, max_minutes: int) -> list[S
         )
     )
     return list(result.scalars().all())
+
+
+async def create_scrap_job_file_link(
+    db: AsyncSession, scrap_job_id: int, scrapper_id: int
+) -> ScrapJobFile:
+    """Link a scrap job to a scrapper record."""
+    row = ScrapJobFile(scrap_job_id=scrap_job_id, scrapper_id=scrapper_id)
+    db.add(row)
+    await db.flush()
+    await db.refresh(row)
+    return row
+
+
+async def list_scrappers_for_scrap_job(
+    db: AsyncSession, scrap_job_id: int
+) -> list[Scrapper]:
+    """Return scrappers linked to a scrap job."""
+    q = (
+        select(Scrapper)
+        .join(ScrapJobFile, ScrapJobFile.scrapper_id == Scrapper.id)
+        .where(ScrapJobFile.scrap_job_id == scrap_job_id)
+        .order_by(Scrapper.id.asc())
+    )
+    result = await db.execute(q)
+    return list(result.scalars().unique().all())
+
+
+async def scrap_job_owns_scrapper(
+    db: AsyncSession, scrap_job_id: int, scrapper_id: int
+) -> bool:
+    """Return True if the scrapper is linked to the scrap job."""
+    result = await db.execute(
+        select(ScrapJobFile.id).where(
+            ScrapJobFile.scrap_job_id == scrap_job_id,
+            ScrapJobFile.scrapper_id == scrapper_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None

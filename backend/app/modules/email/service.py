@@ -88,6 +88,7 @@ class EmailService:
         status = "success"
         response = None
         email_log_id = None
+        send_error: Exception | None = None
         try:
             await aiosmtplib.send(
                 message,
@@ -101,7 +102,7 @@ class EmailService:
         except Exception as exc:
             status = "error"
             response = str(exc)
-            raise
+            send_error = exc
         finally:
             log_data = {
                 "subject": subject,

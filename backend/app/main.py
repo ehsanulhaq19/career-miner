@@ -27,7 +27,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown events."""
-    start_scheduler()
+    await start_scheduler()
     yield
     stop_scheduler()
 

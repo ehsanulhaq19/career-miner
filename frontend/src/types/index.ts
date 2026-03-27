@@ -144,6 +144,13 @@ export interface ScrapJobLog {
   created_at: string;
 }
 
+export interface ScrapperFile {
+  id: number;
+  file_path: string;
+  source_url: string;
+  created_at: string;
+}
+
 export interface ScrapClientJob {
   id: number;
   name: string;

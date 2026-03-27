@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     RESUME_UPLOAD_FOLDER: str = "uploads/resumes"
     JOB_APPLICATION_OUTPUT_FOLDER: str = "temp/job_application/resume"
+    SCRAP_HTML_OUTPUT_FOLDER: str = "temp/scrap_html"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

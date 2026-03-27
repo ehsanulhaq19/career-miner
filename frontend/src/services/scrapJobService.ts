@@ -1,5 +1,5 @@
 import api from "./api";
-import { PaginatedResponse, ScrapJob, ScrapJobLog } from "@/types";
+import { PaginatedResponse, ScrapJob, ScrapJobLog, ScrapperFile } from "@/types";
 
 export const scrapJobService = {
   async getScrapJobs(params?: {
@@ -55,6 +55,20 @@ export const scrapJobService = {
   async getScrapJobLogs(scrapJobId: number) {
     const { data } = await api.get<{ items: ScrapJobLog[] }>(
       `/scrap-jobs/${scrapJobId}/logs`
+    );
+    return data;
+  },
+
+  async getScrapJobScrappers(scrapJobId: number) {
+    const { data } = await api.get<{ items: ScrapperFile[] }>(
+      `/scrap-jobs/${scrapJobId}/scrappers`
+    );
+    return data;
+  },
+
+  async getScrapJobScrapperHtml(scrapJobId: number, scrapperId: number) {
+    const { data } = await api.get<{ source_url: string; html: string }>(
+      `/scrap-jobs/${scrapJobId}/scrappers/${scrapperId}/html`
     );
     return data;
   },

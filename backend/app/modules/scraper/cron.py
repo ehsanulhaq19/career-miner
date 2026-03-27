@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -14,12 +15,13 @@ from app.modules.scrap_job.crud import (
 )
 from app.modules.scrap_job.models import ScrapJobStatus
 from app.modules.scrap_job.schemas import ScrapJobResponse
-from app.modules.websocket.service import broadcast_scrap_job_status
 from app.modules.scraper.service import ScraperService
+from app.modules.websocket.service import broadcast_scrap_job_status
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-scheduler = AsyncIOScheduler()
+
+_scheduler: AsyncIOScheduler | None = None
 
 
 async def scraping_cron_job() -> None:
@@ -90,27 +92,43 @@ async def _process_eligible_sites(db) -> None:
         await update_last_scrapped(db, job_site.id, datetime.now(timezone.utc).replace(tzinfo=None))
 
 
-def start_scheduler() -> None:
-    """Start the APScheduler with the scraping cron job running every minute."""
-    if not scheduler.running:
-        scheduler.add_job(
-            scraping_cron_job,
-            "interval",
-            minutes=1,
-            id="scraping_cron",
-            replace_existing=True,
-        )
-        scheduler.add_job(
-            workflow_cron_job,
-            "interval",
-            minutes=1,
-            id="workflow_cron",
-            replace_existing=True,
-        )
-        scheduler.start()
+async def start_scheduler() -> None:
+    """
+    Start APScheduler bound to the current asyncio loop (uvicorn / FastAPI lifespan).
+    AsyncIOScheduler must use asyncio.get_running_loop() so jobs run on the same loop as the app.
+    """
+    global _scheduler
+    if _scheduler is not None and _scheduler.running:
+        return
+    loop = asyncio.get_running_loop()
+    _scheduler = AsyncIOScheduler(
+        event_loop=loop,
+        job_defaults={
+            "coalesce": True,
+            "max_instances": 1,
+            "misfire_grace_time": 3600,
+        },
+    )
+    _scheduler.add_job(
+        scraping_cron_job,
+        "interval",
+        minutes=1,
+        id="scraping_cron",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        workflow_cron_job,
+        "interval",
+        minutes=1,
+        id="workflow_cron",
+        replace_existing=True,
+    )
+    _scheduler.start()
 
 
 def stop_scheduler() -> None:
     """Shut down the scheduler gracefully."""
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
+    global _scheduler
+    if _scheduler is not None and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+    _scheduler = None

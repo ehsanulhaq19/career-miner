@@ -67,3 +67,15 @@ class ScrapClientJob(Base):
     meta_data = Column(JSON, default=dict, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class ScrapClientFile(Base):
+    """Associates a scrap client job with a stored HTML page (Scrapper row)."""
+
+    __tablename__ = "scrap_client_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scrap_client_job_id = Column(
+        Integer, ForeignKey("scrap_client_jobs.id"), nullable=False
+    )
+    scrapper_id = Column(Integer, ForeignKey("scrappers.id"), nullable=False)

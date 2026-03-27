@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.scrap_job.crud import (
@@ -11,6 +13,8 @@ from app.modules.scrap_job.crud import (
     get_scrap_job_by_id,
     get_scrap_job_logs_by_scrap_job_id,
     get_scrap_jobs,
+    list_scrappers_for_scrap_job,
+    scrap_job_owns_scrapper,
     update_scrap_job_meta_data,
     update_scrap_job_status,
 )
@@ -21,6 +25,12 @@ from app.modules.scrap_job.schemas import (
     ScrapJobLogResponse,
     ScrapJobResponse,
     TestScrapRequest,
+)
+from app.modules.scraper.crud import get_scrapper_by_id
+from app.modules.scraper.schemas import (
+    ScrapperHtmlPreviewResponse,
+    ScrapperListResponse,
+    ScrapperResponse,
 )
 from app.modules.websocket.service import broadcast_scrap_job_status
 
@@ -213,4 +223,49 @@ async def get_scrap_job_logs(
     logs = await get_scrap_job_logs_by_scrap_job_id(db, scrap_job_id)
     return ScrapJobLogListResponse(
         items=[ScrapJobLogResponse.model_validate(log) for log in logs]
+    )
+
+
+async def list_scrappers_for_scrap_job_service(
+    db: AsyncSession,
+    scrap_job_id: int,
+) -> ScrapperListResponse:
+    """Return all scrapper HTML artifacts linked to a scrap job."""
+    scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
+    if scrap_job is None:
+        raise NotFoundException(detail="Scrap job not found")
+    rows = await list_scrappers_for_scrap_job(db, scrap_job_id)
+    return ScrapperListResponse(
+        items=[ScrapperResponse.model_validate(r) for r in rows],
+    )
+
+
+async def get_scrapper_html_for_scrap_job(
+    db: AsyncSession,
+    scrap_job_id: int,
+    scrapper_id: int,
+) -> ScrapperHtmlPreviewResponse:
+    """Load stored HTML for a scrapper row that belongs to the given scrap job."""
+    scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
+    if scrap_job is None:
+        raise NotFoundException(detail="Scrap job not found")
+    if not await scrap_job_owns_scrapper(db, scrap_job_id, scrapper_id):
+        raise NotFoundException(detail="Scrapper not found for this job")
+    scrapper = await get_scrapper_by_id(db, scrapper_id)
+    if scrapper is None:
+        raise NotFoundException(detail="Scrapper not found")
+    settings = get_settings()
+    path = Path(scrapper.file_path)
+    if not path.is_absolute():
+        path = Path(settings.SCRAP_HTML_OUTPUT_FOLDER).resolve() / scrapper.file_path
+    if not path.is_file():
+        raise NotFoundException(detail="Stored HTML file is missing")
+    max_bytes = 12 * 1024 * 1024
+    raw = path.read_bytes()
+    if len(raw) > max_bytes:
+        raw = raw[:max_bytes]
+    html = raw.decode("utf-8", errors="replace")
+    return ScrapperHtmlPreviewResponse(
+        source_url=scrapper.source_url,
+        html=html,
     )

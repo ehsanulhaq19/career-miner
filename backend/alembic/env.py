@@ -22,7 +22,7 @@ from app.modules.career_job.models import (  # noqa: F401
     CareerJobScrapJobLink,
     CareerJobUser,
 )
-from app.modules.scrap_job.models import ScrapJob  # noqa: F401
+from app.modules.scrap_job.models import ScrapJob, ScrapJobFile  # noqa: F401
 from app.modules.resume.models import Resume  # noqa: F401
 from app.modules.email.models import EmailLog  # noqa: F401
 from app.modules.job_application.models import (  # noqa: F401
@@ -34,7 +34,12 @@ from app.modules.job_application.models import (  # noqa: F401
     JobApplicationBulkJobApplicationLink,
     JobApplicationEmailLog,
 )
-from app.modules.scrap_client.models import ScrapClientJob, ScrapClientLog  # noqa: F401
+from app.modules.scrap_client.models import (  # noqa: F401
+    ScrapClientFile,
+    ScrapClientJob,
+    ScrapClientLog,
+)
+from app.modules.scraper.models import Scrapper  # noqa: F401
 from app.modules.workflow.models import (  # noqa: F401
     Workflow,
     WorkflowExecution,

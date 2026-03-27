@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -84,10 +85,12 @@ class WebsiteCrawler:
         self,
         base_url: str,
         on_page_fetched: Callable[[str, str], None] | None = None,
+        on_page_html: Callable[[str, str], Awaitable[Any]] | None = None,
     ) -> list[tuple[str, str]]:
         """
         Crawl high-value pages on the website.
         Returns list of (url, html_content) tuples.
+        When on_page_html is set, it is awaited after each successful fetch (url, html).
         """
         root_domain = extract_root_domain(base_url)
         if not root_domain:
@@ -130,6 +133,8 @@ class WebsiteCrawler:
                     results.append((url_norm, html))
                     if on_page_fetched:
                         on_page_fetched(url_norm, html)
+                    if on_page_html:
+                        await on_page_html(url_norm, html)
                     self._discover_contact_links(
                         html, base_origin, netloc, visited, to_visit
                     )

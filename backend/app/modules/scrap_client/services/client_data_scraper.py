@@ -28,6 +28,7 @@ from app.modules.scrap_client.services.website_discovery import (
     DiscoveryResult,
     discover_company_info,
 )
+from app.modules.scraper.service import ScraperHtmlStorage
 
 logger = logging.getLogger(__name__)
 
@@ -441,15 +442,44 @@ async def scrape_clients_from_url(
         return 0
     html, final_url = fetch_result
 
+    if scrap_client_job_id is not None:
+        try:
+            await ScraperHtmlStorage.persist_for_scrap_client_job(
+                db, scrap_client_job_id, html, final_url
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not persist client scrap HTML for job %s: %s",
+                scrap_client_job_id,
+                e,
+            )
+
     clients = _extract_clients_from_html(html, final_url)
     if not clients:
         clients = await _parse_clients_via_llm(html)
     all_clients.extend(clients)
 
-    # Skip crawler for anti-bot domains (e.g. GoodFirms) - httpx would get blocked
     if not _url_needs_playwright(normalized_url):
         crawler = WebsiteCrawler(max_pages=max_pages)
-        pages = await crawler.crawl(normalized_url)
+
+        async def _on_crawl_page(page_url: str, page_html: str) -> None:
+            if scrap_client_job_id is None:
+                return
+            try:
+                await ScraperHtmlStorage.persist_for_scrap_client_job(
+                    db, scrap_client_job_id, page_html, page_url
+                )
+            except Exception as e:
+                logger.warning(
+                    "Could not persist crawled client HTML for job %s: %s",
+                    scrap_client_job_id,
+                    e,
+                )
+
+        pages = await crawler.crawl(
+            normalized_url,
+            on_page_html=_on_crawl_page if scrap_client_job_id is not None else None,
+        )
         for page_url, page_html in pages[:max_pages - 1]:
             page_clients = _extract_clients_from_html(page_html, page_url)
             for c in page_clients:

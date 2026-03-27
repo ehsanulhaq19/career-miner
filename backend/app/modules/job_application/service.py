@@ -653,8 +653,8 @@ async def send_job_application_email(
     """
     Send emails for a job application to each to_email address.
     Uses subject, cover_letter, output_resume_path from the job application.
-    Creates JobApplicationEmailLog for each successful send and marks
-    is_email_send true when all emails are sent successfully.
+    Creates JobApplicationEmailLog for each send attempt (email_logs row)
+    and marks is_email_send when every recipient send succeeds.
     """
     job_application = await get_job_application_by_id(
         db, job_application_id, user_id
@@ -670,36 +670,41 @@ async def send_job_application_email(
     cover_letter = job_application.cover_letter or ""
     attachment_path = job_application.output_resume_path
     resume = await get_resume_by_id(db, job_application.resume_id, user_id)
+    attachment_filename = resume.name if resume else None
 
     email_service = EmailService()
-    all_success = True
+    per_recipient_ok: list[bool] = []
     for to_email in to_emails:
         to_email = str(to_email).strip()
         if not to_email:
             continue
-        try:
-            result = await email_service.send_email(
-                recipient=to_email,
-                subject=subject,
-                content=cover_letter,
-                attachment_path=attachment_path,
-                attachment_filename=resume.name,
+        result = await email_service.send_email(
+            recipient=to_email,
+            subject=subject,
+            content=cover_letter,
+            attachment_path=attachment_path,
+            attachment_filename=attachment_filename,
+            raise_on_failure=False,
+        )
+        if result.get("email_log_id"):
+            await create_job_application_email_log(
+                db,
+                job_application_id,
+                result["email_log_id"],
+                bulk_job_application_email_send_id=bulk_job_application_email_send_id,
             )
-            if result.get("email_log_id"):
-                await create_job_application_email_log(
-                    db,
-                    job_application_id,
-                    result["email_log_id"],
-                    bulk_job_application_email_send_id=bulk_job_application_email_send_id,
-                )
-        except Exception:
-            all_success = False
-            raise
+        per_recipient_ok.append(result.get("status") == "success")
 
-    # if all_success:
-    await crud_update_job_application(
-        db, job_application_id, user_id, {"is_email_send": True, "is_active": False}
-    )
+    if not per_recipient_ok:
+        raise BadRequestException(detail="No valid recipient emails to send to")
+
+    if not any(per_recipient_ok):
+        raise BadRequestException(detail="Failed to send email to any recipient")
+
+    if all(per_recipient_ok):
+        await crud_update_job_application(
+            db, job_application_id, user_id, {"is_email_send": True, "is_active": False}
+        )
 
     job_application = await get_job_application_by_id(
         db, job_application_id, user_id

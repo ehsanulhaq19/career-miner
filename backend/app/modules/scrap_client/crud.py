@@ -4,10 +4,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.scrap_client.models import (
+    ScrapClientFile,
     ScrapClientJob,
-    ScrapClientLog,
     ScrapClientJobStatus,
+    ScrapClientLog,
 )
+from app.modules.scraper.models import Scrapper
 
 
 async def get_scrap_client_jobs(
@@ -141,3 +143,46 @@ async def get_scrap_client_job_logs_by_job_id(
         .order_by(ScrapClientLog.created_at.asc())
     )
     return list(result.scalars().all())
+
+
+async def create_scrap_client_file_link(
+    db: AsyncSession, scrap_client_job_id: int, scrapper_id: int
+) -> ScrapClientFile:
+    """Link a scrap client job to a scrapper record."""
+    row = ScrapClientFile(
+        scrap_client_job_id=scrap_client_job_id, scrapper_id=scrapper_id
+    )
+    db.add(row)
+    await db.flush()
+    await db.refresh(row)
+    return row
+
+
+async def list_scrappers_for_scrap_client_job(
+    db: AsyncSession, scrap_client_job_id: int
+) -> list[Scrapper]:
+    """Return scrappers linked to a scrap client job."""
+    q = (
+        select(Scrapper)
+        .join(
+            ScrapClientFile,
+            ScrapClientFile.scrapper_id == Scrapper.id,
+        )
+        .where(ScrapClientFile.scrap_client_job_id == scrap_client_job_id)
+        .order_by(Scrapper.id.asc())
+    )
+    result = await db.execute(q)
+    return list(result.scalars().unique().all())
+
+
+async def scrap_client_job_owns_scrapper(
+    db: AsyncSession, scrap_client_job_id: int, scrapper_id: int
+) -> bool:
+    """Return True if the scrapper is linked to the scrap client job."""
+    result = await db.execute(
+        select(ScrapClientFile.id).where(
+            ScrapClientFile.scrap_client_job_id == scrap_client_job_id,
+            ScrapClientFile.scrapper_id == scrapper_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
