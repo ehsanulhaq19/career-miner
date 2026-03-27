@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import date
 from pathlib import Path
 import random
 import asyncio
@@ -27,10 +28,13 @@ from app.modules.job_application.crud import (
     get_email_send_count_for_job_application,
     filter_job_application_ids_by_min_similarity,
     get_job_application_by_id,
+    get_job_application_dates_grouped as crud_get_job_application_dates_grouped,
     get_job_applications,
+    get_job_applications_by_created_date,
     get_job_applications_by_date_and_similarity,
     update_bulk_job_application_status,
     update_bulk_job_application_email_send_status,
+    bulk_update_job_applications_is_active,
     update_job_application as crud_update_job_application,
 )
 from app.modules.job_application.prompts import (
@@ -48,6 +52,8 @@ from app.modules.job_application.schemas import (
     BulkJobApplicationLogResponse,
     BulkJobApplicationResponse,
     EmailLogResponse,
+    JobApplicationDateGroupListResponse,
+    JobApplicationDateGroupResponse,
     JobApplicationListResponse,
     JobApplicationResponse,
 )
@@ -309,6 +315,60 @@ async def list_job_applications(
     )
 
 
+async def get_job_application_dates_grouped(
+    db: AsyncSession,
+    user_id: int,
+    skip: int = 0,
+    limit: int = 50,
+) -> JobApplicationDateGroupListResponse:
+    """
+    Return paginated distinct creation dates with application counts for the user.
+    """
+    rows, total = await crud_get_job_application_dates_grouped(
+        db, user_id, skip=skip, limit=limit
+    )
+    items = [
+        JobApplicationDateGroupResponse(
+            date=r[0].isoformat(),
+            application_count=r[1],
+        )
+        for r in rows
+    ]
+    page = (skip // limit) + 1 if limit > 0 else 1
+    return JobApplicationDateGroupListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+async def list_job_applications_by_created_date(
+    db: AsyncSession,
+    user_id: int,
+    target_date: date,
+    skip: int = 0,
+    limit: int = 50,
+) -> JobApplicationListResponse:
+    """
+    Return paginated job applications created on the given calendar date.
+    """
+    items, total = await get_job_applications_by_created_date(
+        db, user_id, target_date, skip=skip, limit=limit
+    )
+    response_items = []
+    for item in items:
+        enriched = await _enrich_job_application_response(db, item)
+        response_items.append(enriched)
+    page = (skip // limit) + 1 if limit > 0 else 1
+    return JobApplicationListResponse(
+        items=response_items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
 async def get_job_application(
     db: AsyncSession, job_application_id: int, user_id: int
 ) -> JobApplicationResponse:
@@ -334,6 +394,24 @@ async def update_job_application(
     if updated is None:
         return None
     return await _enrich_job_application_response(db, updated)
+
+
+async def bulk_update_job_applications(
+    db: AsyncSession,
+    user_id: int,
+    job_application_ids: list[int],
+    is_active: bool,
+) -> int:
+    """
+    Bulk-update is_active for job applications owned by the user.
+    Returns the number of rows updated.
+    """
+    return await bulk_update_job_applications_is_active(
+        db,
+        user_id,
+        job_application_ids,
+        is_active,
+    )
 
 
 async def _create_bulk_log_and_broadcast(
@@ -618,10 +696,10 @@ async def send_job_application_email(
             all_success = False
             raise
 
-    if all_success:
-        await crud_update_job_application(
-            db, job_application_id, user_id, {"is_email_send": True, "is_active": False}
-        )
+    # if all_success:
+    await crud_update_job_application(
+        db, job_application_id, user_id, {"is_email_send": True, "is_active": False}
+    )
 
     job_application = await get_job_application_by_id(
         db, job_application_id, user_id

@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, cast, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.job_application.models import (
@@ -74,6 +74,67 @@ async def get_job_applications(
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
+    return items, total
+
+
+async def get_job_application_dates_grouped(
+    db: AsyncSession,
+    user_id: int,
+    skip: int = 0,
+    limit: int = 50,
+) -> tuple[list[tuple[date, int]], int]:
+    """
+    Return distinct created_at dates with application count per date for the user.
+    Ordered by date descending.
+    """
+    date_col = cast(JobApplication.created_at, Date)
+    grouped = (
+        select(date_col, func.count(JobApplication.id).label("application_count"))
+        .where(JobApplication.user_id == user_id)
+        .group_by(date_col)
+        .order_by(date_col.desc())
+    )
+    count_subq = (
+        select(date_col)
+        .where(JobApplication.user_id == user_id)
+        .distinct()
+        .subquery()
+    )
+    count_result = await db.execute(select(func.count()).select_from(count_subq))
+    total = count_result.scalar() or 0
+    result = await db.execute(grouped.offset(skip).limit(limit))
+    rows = result.all()
+    return [(r[0], r[1]) for r in rows], total
+
+
+async def get_job_applications_by_created_date(
+    db: AsyncSession,
+    user_id: int,
+    target_date: date,
+    skip: int = 0,
+    limit: int = 50,
+) -> tuple[list[JobApplication], int]:
+    """
+    Return job applications for the user created on the given calendar date.
+    Results ordered by created_at descending.
+    """
+    date_col = cast(JobApplication.created_at, Date)
+    base_query = (
+        select(JobApplication)
+        .where(JobApplication.user_id == user_id)
+        .where(date_col == target_date)
+        .order_by(JobApplication.created_at.desc())
+    )
+    count_query = (
+        select(func.count(JobApplication.id))
+        .where(JobApplication.user_id == user_id)
+        .where(date_col == target_date)
+    )
+    query = base_query.offset(skip).limit(limit)
+    result = await db.execute(query)
+    items = list(result.scalars().all())
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
     return items, total
 
 
@@ -307,6 +368,27 @@ async def update_job_application(
     await db.flush()
     await db.refresh(job_application)
     return job_application
+
+
+async def bulk_update_job_applications_is_active(
+    db: AsyncSession,
+    user_id: int,
+    job_application_ids: list[int],
+    is_active: bool,
+) -> int:
+    """Set is_active for all job applications owned by the user with given ids."""
+    if not job_application_ids:
+        return 0
+    result = await db.execute(
+        update(JobApplication)
+        .where(
+            JobApplication.user_id == user_id,
+            JobApplication.id.in_(job_application_ids),
+        )
+        .values(is_active=is_active)
+    )
+    await db.flush()
+    return int(result.rowcount or 0)
 
 
 async def create_job_application_email_log(

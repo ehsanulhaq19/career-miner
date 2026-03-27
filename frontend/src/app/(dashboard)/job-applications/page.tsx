@@ -9,12 +9,14 @@ import {
   HiOutlineDocumentDuplicate,
   HiOutlineEnvelope,
   HiOutlineXMark,
+  HiOutlinePencilSquare,
 } from "react-icons/hi2";
 import { jobApplicationService } from "@/services/jobApplicationService";
 import { JobApplication, EmailLog } from "@/types";
 import JobApplicationDetailModal from "@/components/JobApplicationDetailModal";
 import CreateJobApplicationModal from "@/components/CreateJobApplicationModal";
 import BulkJobApplicationModal from "@/components/BulkJobApplicationModal";
+import BulkJobApplicationEditModal from "@/components/BulkJobApplicationEditModal";
 import BulkEmailSendModal from "@/components/BulkEmailSendModal";
 
 export default function JobApplicationsPage() {
@@ -30,6 +32,7 @@ export default function JobApplicationsPage() {
     useState<JobApplication | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
   const [bulkEmailModalOpen, setBulkEmailModalOpen] = useState(false);
   const [sendEmailConfirmApp, setSendEmailConfirmApp] =
     useState<JobApplication | null>(null);
@@ -88,6 +91,13 @@ export default function JobApplicationsPage() {
           >
             <HiOutlineEnvelope className="w-4 h-4" />
             Bulk Email
+          </button>
+          <button
+            onClick={() => setBulkEditModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <HiOutlinePencilSquare className="w-4 h-4" />
+            Bulk Edit
           </button>
           <button
             onClick={() => setBulkModalOpen(true)}
@@ -300,6 +310,13 @@ export default function JobApplicationsPage() {
         onClose={() => setBulkModalOpen(false)}
         onCreated={() => {
           setPage(1);
+          refetch();
+        }}
+      />
+      <BulkJobApplicationEditModal
+        isOpen={bulkEditModalOpen}
+        onClose={() => setBulkEditModalOpen(false)}
+        onApplied={() => {
           refetch();
         }}
       />

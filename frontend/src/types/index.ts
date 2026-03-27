@@ -183,6 +183,11 @@ export interface CareerJobDateGroup {
   job_count: number;
 }
 
+export interface JobApplicationDateGroup {
+  date: string;
+  application_count: number;
+}
+
 export interface CareerJobWithApplicationCounts extends CareerJob {
   career_client_id?: number | null;
   active_application_count: number;

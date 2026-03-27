@@ -1,3 +1,5 @@
+from datetime import date as Date
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +10,10 @@ from app.modules.auth.models import User
 from app.modules.job_application.schemas import (
     BulkJobApplicationCreateRequest,
     BulkJobApplicationEmailSendRequest,
+    BulkJobApplicationUpdateRequest,
+    BulkJobApplicationUpdateResponse,
     JobApplicationCreateRequest,
+    JobApplicationDateGroupListResponse,
     JobApplicationListResponse,
     JobApplicationResponse,
     JobApplicationUpdate,
@@ -19,15 +24,18 @@ from app.modules.job_application.service import (
     get_bulk_job_application_logs,
     get_bulk_job_application_email_send_logs,
     get_job_application,
+    get_job_application_dates_grouped,
     get_job_application_email_logs,
     get_job_application_file_path,
     list_job_applications,
+    list_job_applications_by_created_date,
     list_job_applications_for_bulk_email,
     run_bulk_job_application_background,
     run_bulk_job_application_email_background,
     send_job_application_email,
     start_bulk_job_application,
     start_bulk_job_application_email_send,
+    bulk_update_job_applications,
     update_job_application,
 )
 
@@ -70,6 +78,52 @@ async def list_job_applications_endpoint(
         skip=skip,
         limit=limit,
         is_active=is_active,
+    )
+
+
+@router.get("/grouped-by-date", response_model=JobApplicationDateGroupListResponse)
+async def get_job_application_dates_grouped_endpoint(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobApplicationDateGroupListResponse:
+    """
+    Return distinct creation dates with application counts for the current user,
+    sorted by date descending. Used for bulk edit UI grouped by date.
+    """
+    return await get_job_application_dates_grouped(
+        db,
+        user_id=current_user.id,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.get("/by-date", response_model=JobApplicationListResponse)
+async def list_job_applications_by_created_date_endpoint(
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobApplicationListResponse:
+    """
+    List job applications created on the given calendar date for the current user.
+    """
+    try:
+        target_date = Date.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid date format, expected YYYY-MM-DD",
+        )
+    return await list_job_applications_by_created_date(
+        db,
+        user_id=current_user.id,
+        target_date=target_date,
+        skip=skip,
+        limit=limit,
     )
 
 
@@ -130,6 +184,28 @@ async def create_bulk_job_applications_endpoint(
         current_user.id,
     )
     return {"id": result.id, "status": result.status}
+
+
+@router.patch("/bulk", response_model=BulkJobApplicationUpdateResponse)
+async def bulk_update_job_applications_endpoint(
+    request: BulkJobApplicationUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BulkJobApplicationUpdateResponse:
+    """
+    Bulk-update is_active for the specified job applications owned by the current user.
+    """
+    if not request.job_application_ids:
+        raise HTTPException(
+            status_code=400, detail="At least one job application must be selected"
+        )
+    updated_count = await bulk_update_job_applications(
+        db,
+        current_user.id,
+        request.job_application_ids,
+        request.is_active,
+    )
+    return BulkJobApplicationUpdateResponse(updated_count=updated_count)
 
 
 @router.get("/bulk/{bulk_job_application_id}/logs")

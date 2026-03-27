@@ -4,6 +4,7 @@ import {
   BulkJobApplicationEmailSendLog,
   EmailLog,
   JobApplication,
+  JobApplicationDateGroup,
   PaginatedResponse,
 } from "@/types";
 
@@ -21,7 +22,34 @@ export interface JobApplicationUpdatePayload {
   is_active?: boolean;
 }
 
+export interface BulkJobApplicationUpdatePayload {
+  job_application_ids: number[];
+  is_active: boolean;
+}
+
 export const jobApplicationService = {
+  async getJobApplicationDatesGrouped(skip = 0, limit = 50) {
+    const { data } = await api.get<{
+      items: JobApplicationDateGroup[];
+      total: number;
+      page: number;
+      limit: number;
+    }>("/job-applications/grouped-by-date", { params: { skip, limit } });
+    return data;
+  },
+
+  async getJobApplicationsByCreatedDate(
+    date: string,
+    skip = 0,
+    limit = 50
+  ) {
+    const { data } = await api.get<PaginatedResponse<JobApplication>>(
+      "/job-applications/by-date",
+      { params: { date, skip, limit } }
+    );
+    return data;
+  },
+
   async getJobApplications(
     skip = 0,
     limit = 20,
@@ -65,6 +93,14 @@ export const jobApplicationService = {
 
   async createBulkJobApplications(payload: BulkJobApplicationCreatePayload) {
     const { data } = await api.post<{ id: number; status: string }>(
+      "/job-applications/bulk",
+      payload
+    );
+    return data;
+  },
+
+  async bulkUpdateJobApplications(payload: BulkJobApplicationUpdatePayload) {
+    const { data } = await api.patch<{ updated_count: number }>(
       "/job-applications/bulk",
       payload
     );

@@ -17,6 +17,19 @@ class BulkJobApplicationCreateRequest(BaseModel):
     career_job_ids: list[int]
 
 
+class BulkJobApplicationUpdateRequest(BaseModel):
+    """Schema for bulk-updating job applications (is_active only)."""
+
+    job_application_ids: list[int]
+    is_active: bool
+
+
+class BulkJobApplicationUpdateResponse(BaseModel):
+    """Schema for bulk job application update result."""
+
+    updated_count: int
+
+
 class BulkJobApplicationEmailSendRequest(BaseModel):
     """Schema for bulk job application email send request."""
 
@@ -104,6 +117,22 @@ class JobApplicationListResponse(BaseModel):
     """Schema for paginated list of job applications."""
 
     items: list[JobApplicationResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class JobApplicationDateGroupResponse(BaseModel):
+    """Schema for a date group in the job applications tabular UI."""
+
+    date: str
+    application_count: int
+
+
+class JobApplicationDateGroupListResponse(BaseModel):
+    """Schema for paginated list of job application date groups."""
+
+    items: list[JobApplicationDateGroupResponse]
     total: int
     page: int
     limit: int
