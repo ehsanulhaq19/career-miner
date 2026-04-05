@@ -3,6 +3,7 @@ import {
   BulkCareerClientEmailSendLog,
   CareerClient,
   CareerClientEmailRow,
+  CareerClientImportResponse,
   EmailLog,
   PaginatedResponse,
 } from "@/types";
@@ -26,7 +27,8 @@ export const careerClientService = {
     skip = 0,
     limit = 20,
     hasEmailInformation?: boolean | null,
-    emailFoundError?: boolean | null
+    emailFoundError?: boolean | null,
+    hasImportSource?: boolean | null
   ) {
     const params: Record<string, string | number | boolean> = {
       skip,
@@ -41,6 +43,11 @@ export const careerClientService = {
       params.email_found_error = true;
     } else if (emailFoundError === false) {
       params.email_found_error = false;
+    }
+    if (hasImportSource === true) {
+      params.has_import_source = true;
+    } else if (hasImportSource === false) {
+      params.has_import_source = false;
     }
     const { data } = await api.get<PaginatedResponse<CareerClient>>(
       "/career-clients",
@@ -136,6 +143,17 @@ export const careerClientService = {
   async getBulkCareerClientEmailSendLogs(bulkId: number) {
     const { data } = await api.get<{ items: BulkCareerClientEmailSendLog[] }>(
       `/career-clients/bulk-email/${bulkId}/logs`
+    );
+    return data;
+  },
+
+  async importCareerClients(
+    source: string,
+    clients: Record<string, unknown>[]
+  ) {
+    const { data } = await api.post<CareerClientImportResponse>(
+      "/career-clients/import",
+      { source, clients }
     );
     return data;
   },

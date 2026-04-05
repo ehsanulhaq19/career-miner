@@ -215,6 +215,7 @@ export interface ScrapClientLog {
 export interface CareerClient {
   id: number;
   emails: string[];
+  phone_numbers?: string[];
   official_website?: string | null;
   name: string | null;
   location: string | null;
@@ -224,6 +225,18 @@ export interface CareerClient {
   size: string | null;
   is_active: boolean;
   created_at: string;
+}
+
+export interface CareerClientImportError {
+  index: number;
+  record: Record<string, unknown>;
+  message: string;
+}
+
+export interface CareerClientImportResponse {
+  created_count: number;
+  updated_count: number;
+  errors: CareerClientImportError[];
 }
 
 export interface CareerClientEmailRow {

@@ -6,6 +6,7 @@ import {
   type WorkflowDetail,
   type WorkflowExecution,
   type WorkflowExecutionDetail,
+  type WorkflowTaskInputPayload,
   type WorkflowTaskUpdatePayload,
   type WorkflowUpdatePayload,
 } from "@/services/workflowService";
@@ -189,6 +190,30 @@ export const patchWorkflowTask = createAsyncThunk(
   }
 );
 
+export const addWorkflowTask = createAsyncThunk(
+  "workflow/addTask",
+  async (
+    {
+      workflowId,
+      data,
+    }: {
+      workflowId: number;
+      data: WorkflowTaskInputPayload;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      await workflowService.addWorkflowTask(workflowId, data);
+      return await workflowService.getWorkflowDetail(workflowId);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      return rejectWithValue(
+        err.response?.data?.detail || "Failed to add task"
+      );
+    }
+  }
+);
+
 export const runWorkflow = createAsyncThunk(
   "workflow/run",
   async (id: number, { rejectWithValue }) => {
@@ -308,6 +333,18 @@ const workflowSlice = createSlice({
         }
       })
       .addCase(patchWorkflowTask.rejected, (state, action) => {
+        state.error = action.payload as string;
+      })
+      .addCase(addWorkflowTask.fulfilled, (state, action) => {
+        if (state.workflowDetail?.id === action.payload.id) {
+          state.workflowDetail = action.payload;
+        }
+        const idx = state.items.findIndex((i) => i.id === action.payload.id);
+        if (idx !== -1) {
+          state.items[idx] = workflowToListRow(action.payload);
+        }
+      })
+      .addCase(addWorkflowTask.rejected, (state, action) => {
         state.error = action.payload as string;
       })
       .addCase(runWorkflow.rejected, (state, action) => {

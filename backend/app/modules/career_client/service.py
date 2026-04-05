@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from time import time
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, NotFoundException
@@ -15,7 +16,9 @@ from app.modules.career_client.crud import (
     bulk_update_career_clients_by_location as crud_bulk_update,
     create_bulk_career_client_email_send,
     create_bulk_career_client_email_send_log,
+    create_career_client,
     create_career_client_email_log,
+    find_career_client_for_import,
     get_bulk_career_client_email_send_by_id,
     get_bulk_career_client_email_send_logs as crud_get_bulk_cc_email_logs,
     get_career_client_by_id as crud_get_career_client_by_id,
@@ -29,7 +32,10 @@ from app.modules.career_client.crud import (
     update_career_client as crud_update_career_client,
     update_bulk_career_client_email_send_status,
 )
-from app.modules.career_client.models import BulkCareerClientEmailSendStatus
+from app.modules.career_client.models import (
+    BulkCareerClientEmailSendStatus,
+    CareerClient,
+)
 from app.modules.career_client.prompts import (
     CAREER_CLIENT_OUTREACH_SYSTEM_PROMPT,
     CAREER_CLIENT_OUTREACH_USER_PROMPT_TEMPLATE,
@@ -50,6 +56,10 @@ from app.modules.career_client.schemas import (
     CareerClientEmailRowsListResponse,
     BulkCareerClientEmailSendLogListResponse,
     BulkCareerClientEmailSendLogResponse,
+    CareerClientImportErrorItem,
+    CareerClientImportItem,
+    CareerClientImportRequest,
+    CareerClientImportResponse,
 )
 from app.modules.email.service import EmailService
 from app.modules.job_application.schemas import EmailLogResponse
@@ -552,12 +562,197 @@ async def get_career_client_by_id(
     return CareerClientResponse.model_validate(client)
 
 
+def _normalize_website_host(value: str | None) -> str | None:
+    """
+    Normalize a website URL or host for duplicate detection during import.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    s = s.lower()
+    s = re.sub(r"^https?://", "", s, flags=re.I)
+    s = s.split("/")[0]
+    s = s.split("?")[0]
+    if s.startswith("www."):
+        s = s[4:]
+    s = s.rstrip("/")
+    return s or None
+
+
+def _merge_unique_emails(a: list[str], b: list[str]) -> list[str]:
+    """
+    Combine email lists while dropping duplicates case-insensitively.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for e in a + b:
+        if not e or not str(e).strip():
+            continue
+        key = str(e).strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(str(e).strip())
+    return out
+
+
+def _merge_unique_strings(a: list[str], b: list[str]) -> list[str]:
+    """
+    Combine string lists while dropping duplicates using case-sensitive trim.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for e in a + b:
+        if not e or not str(e).strip():
+            continue
+        key = str(e).strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _pick_scalar_merge(
+    existing_val: str | None,
+    incoming_val: str | None,
+) -> str | None:
+    """
+    Prefer a non-empty existing scalar; otherwise fill from incoming when present.
+    """
+    cur = (existing_val or "").strip() if existing_val else ""
+    if cur:
+        return existing_val
+    inc = (incoming_val or "").strip() if incoming_val else ""
+    if inc:
+        return inc
+    return existing_val
+
+
+def _build_import_merge_payload(
+    existing: CareerClient,
+    item: CareerClientImportItem,
+    source: str,
+) -> dict:
+    """
+    Build update fields when merging an import row into an existing client.
+    """
+    merged_emails = _merge_unique_emails(
+        list(existing.emails or []),
+        list(item.emails or []),
+    )
+    merged_phones = _merge_unique_strings(
+        list(existing.phone_numbers or []),
+        list(item.phone_numbers or []),
+    )
+    nm = _pick_scalar_merge(existing.name, item.name)
+    ow = _pick_scalar_merge(existing.official_website, item.official_website)
+    loc = _pick_scalar_merge(existing.location, item.location)
+    det = _pick_scalar_merge(existing.detail, item.detail)
+    meta = dict(existing.meta_data or {})
+    meta["source"] = source.strip()
+    return {
+        "emails": merged_emails,
+        "phone_numbers": merged_phones,
+        "name": nm,
+        "official_website": ow,
+        "location": loc,
+        "detail": det,
+        "meta_data": meta,
+    }
+
+
+def _build_import_create_payload(
+    item: CareerClientImportItem,
+    source: str,
+) -> dict:
+    """
+    Build column values for creating a client from an import row.
+    """
+    meta = {"source": source.strip()}
+    return {
+        "emails": list(item.emails or []),
+        "phone_numbers": list(item.phone_numbers or []),
+        "official_website": (item.official_website or "").strip() or None,
+        "name": (item.name or "").strip() or None,
+        "location": (item.location or "").strip() or None,
+        "detail": (item.detail or "").strip() or None,
+        "meta_data": meta,
+    }
+
+
+async def import_career_clients(
+    db: AsyncSession,
+    request: CareerClientImportRequest,
+) -> CareerClientImportResponse:
+    """
+    Create or merge career clients from a batch, keyed by name or website host.
+    """
+    source = request.source.strip()
+    created_count = 0
+    updated_count = 0
+    errors: list[CareerClientImportErrorItem] = []
+    for idx, raw in enumerate(request.clients):
+        try:
+            item = CareerClientImportItem.model_validate(raw)
+        except ValidationError as exc:
+            errors.append(
+                CareerClientImportErrorItem(
+                    index=idx,
+                    record=dict(raw) if isinstance(raw, dict) else {"raw": raw},
+                    message=str(exc),
+                )
+            )
+            continue
+        name_stripped = (item.name or "").strip()
+        web_key = _normalize_website_host(item.official_website)
+        if not name_stripped and not web_key:
+            errors.append(
+                CareerClientImportErrorItem(
+                    index=idx,
+                    record=item.model_dump(mode="json"),
+                    message="Each client requires name or official_website",
+                )
+            )
+            continue
+        try:
+            existing = await find_career_client_for_import(
+                db,
+                name_stripped or None,
+                web_key,
+            )
+            if existing is None:
+                payload = _build_import_create_payload(item, source)
+                await create_career_client(db, payload)
+                created_count += 1
+            else:
+                payload = _build_import_merge_payload(existing, item, source)
+                await crud_update_career_client(db, existing.id, payload)
+                updated_count += 1
+        except Exception as exc:
+            errors.append(
+                CareerClientImportErrorItem(
+                    index=idx,
+                    record=item.model_dump(mode="json"),
+                    message=str(exc),
+                )
+            )
+    return CareerClientImportResponse(
+        created_count=created_count,
+        updated_count=updated_count,
+        errors=errors,
+    )
+
+
 async def list_career_clients(
     db: AsyncSession,
     skip: int = 0,
     limit: int = 20,
     has_email_information: bool | None = None,
     email_found_error: bool | None = None,
+    has_import_source: bool | None = None,
 ) -> CareerClientListResponse:
     """Return a paginated list of active career clients in descending order."""
     items, total = await get_career_clients(
@@ -566,6 +761,7 @@ async def list_career_clients(
         limit=limit,
         has_email_information=has_email_information,
         email_found_error=email_found_error,
+        has_import_source=has_import_source,
     )
 
     response_items = [CareerClientResponse.model_validate(item) for item in items]

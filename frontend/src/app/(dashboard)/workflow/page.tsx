@@ -10,6 +10,7 @@ import { fetchClientSites } from "@/store/slices/clientSiteSlice";
 import { fetchJobSites } from "@/store/slices/jobSiteSlice";
 import { fetchResumes } from "@/store/slices/resumeSlice";
 import {
+  addWorkflowTask,
   clearExecutionDetail,
   clearWorkflowDetail,
   createWorkflow,
@@ -91,6 +92,11 @@ export default function WorkflowPage() {
     workflowId: number;
     taskId: number;
   } | null>(null);
+  const [taskAddOpen, setTaskAddOpen] = useState(false);
+  const [taskAddRow, setTaskAddRow] = useState<WorkflowTaskRowForm | null>(
+    null
+  );
+  const [taskAddError, setTaskAddError] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeTab === "workflows") {
@@ -101,7 +107,7 @@ export default function WorkflowPage() {
   }, [dispatch, activeTab]);
 
   useEffect(() => {
-    if (!createOpen && !detail) return;
+    if (!createOpen && !detail && editId == null) return;
     dispatch(fetchJobSites({ is_active: true, limit: 500 }));
     dispatch(fetchClientSites({ is_active: true, limit: 500 }));
     dispatch(fetchResumes({ skip: 0, limit: 300 }));
@@ -119,7 +125,7 @@ export default function WorkflowPage() {
     return () => {
       cancelled = true;
     };
-  }, [createOpen, detail, dispatch]);
+  }, [createOpen, detail, editId, dispatch]);
 
   const openDetail = (id: number) => {
     dispatch(fetchWorkflowDetail(id));
@@ -248,6 +254,39 @@ export default function WorkflowPage() {
     setTaskEditRow(null);
     setTaskEditContext(null);
     setTaskEditError(null);
+  };
+
+  const taskAddWorkflowId = detail?.id ?? editId;
+
+  const openTaskAdd = () => {
+    if (taskAddWorkflowId == null) return;
+    setTaskAddError(null);
+    setTaskAddRow(defaultRowForModel("ScrapJob"));
+    setTaskAddOpen(true);
+  };
+
+  const saveTaskAdd = async () => {
+    if (taskAddWorkflowId == null || !taskAddRow) return;
+    const err = validateRow(taskAddRow);
+    if (err) {
+      setTaskAddError(err);
+      return;
+    }
+    setTaskAddError(null);
+    await dispatch(
+      addWorkflowTask({
+        workflowId: taskAddWorkflowId,
+        data: {
+          linked_task_model: taskAddRow.linked_task_model,
+          linked_task_model_data: rowToPayload(taskAddRow),
+          priority: taskAddRow.priority,
+          is_active: taskAddRow.is_active,
+        },
+      })
+    ).unwrap();
+    setTaskAddOpen(false);
+    setTaskAddRow(null);
+    setTaskAddError(null);
   };
 
   const listLoading = activeTab === "workflows" ? loading : loadingExecutions;
@@ -483,6 +522,47 @@ export default function WorkflowPage() {
         </div>
       )}
 
+      {taskAddOpen && taskAddRow && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4">
+            <h2 className="font-semibold text-gray-900 dark:text-white">Add task</h2>
+            {taskAddError ? (
+              <p className="text-sm text-red-600 dark:text-red-400">{taskAddError}</p>
+            ) : null}
+            <WorkflowTaskFormFields
+              row={taskAddRow}
+              jobSites={jobSites}
+              clientSites={clientSites}
+              resumes={resumes}
+              careerJobs={careerJobs}
+              careerClients={careerClients}
+              jobApplications={jobApplicationsOptions}
+              onChange={setTaskAddRow}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                className="px-3 py-2 rounded border border-gray-300 dark:border-gray-600 text-sm"
+                onClick={() => {
+                  setTaskAddOpen(false);
+                  setTaskAddRow(null);
+                  setTaskAddError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-3 py-2 rounded bg-primary-600 text-white text-sm"
+                onClick={() => saveTaskAdd()}
+              >
+                Add task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {taskEditOpen && taskEditRow && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4">
@@ -548,6 +628,13 @@ export default function WorkflowPage() {
               />
               Active
             </label>
+            <button
+              type="button"
+              className="w-full text-sm px-3 py-2 rounded border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200"
+              onClick={() => openTaskAdd()}
+            >
+              Add task
+            </button>
             <div className="flex gap-2 justify-end">
               <button type="button" className="px-3 py-2 border rounded text-sm" onClick={() => setEditId(null)}>
                 Cancel
@@ -575,7 +662,16 @@ export default function WorkflowPage() {
               Last execution: {detail.last_execution_started_at || "—"}
             </p>
             <div>
-              <h3 className="font-medium text-sm mb-2">Tasks</h3>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <h3 className="font-medium text-sm">Tasks</h3>
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600"
+                  onClick={() => openTaskAdd()}
+                >
+                  Add task
+                </button>
+              </div>
               <ul className="text-sm space-y-2">
                 {detail.tasks.map((t) => (
                   <li key={t.id} className="border border-gray-100 dark:border-gray-800 rounded p-2 flex justify-between gap-2">

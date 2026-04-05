@@ -2,16 +2,22 @@ import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
 import { careerClientService } from "@/services/careerClientService";
 import { CareerClient } from "@/types";
 
-export type HasEmailFilter = "all" | "with" | "without";
-export type EmailFoundErrorFilter = "all" | "yes" | "no";
+export type ClientListFilter =
+  | "all"
+  | "with_email"
+  | "without_email"
+  | "scrape_failed"
+  | "scrape_ok";
+
+export type SourceFilter = "all" | "with_source";
 
 interface CareerClientState {
   items: CareerClient[];
   total: number;
   page: number;
   limit: number;
-  hasEmailFilter: HasEmailFilter;
-  emailFoundErrorFilter: EmailFoundErrorFilter;
+  listFilter: ClientListFilter;
+  sourceFilter: SourceFilter;
   loading: boolean;
   error: string | null;
 }
@@ -21,11 +27,29 @@ const initialState: CareerClientState = {
   total: 0,
   page: 1,
   limit: 20,
-  hasEmailFilter: "all",
-  emailFoundErrorFilter: "all",
+  listFilter: "all",
+  sourceFilter: "all",
   loading: false,
   error: null,
 };
+
+function listFilterToQuery(f: ClientListFilter): {
+  hasEmailInformation?: boolean;
+  emailFoundError?: boolean;
+} {
+  switch (f) {
+    case "with_email":
+      return { hasEmailInformation: true };
+    case "without_email":
+      return { hasEmailInformation: false };
+    case "scrape_failed":
+      return { emailFoundError: true };
+    case "scrape_ok":
+      return { emailFoundError: false };
+    default:
+      return {};
+  }
+}
 
 export const fetchCareerClients = createAsyncThunk(
   "careerClient/fetchAll",
@@ -33,17 +57,23 @@ export const fetchCareerClients = createAsyncThunk(
     params?: {
       skip?: number;
       limit?: number;
-      hasEmailInformation?: boolean;
-      emailFoundError?: boolean;
+      listFilter?: ClientListFilter;
+      sourceFilter?: SourceFilter;
     },
     { rejectWithValue }
   ) => {
     try {
+      const lf = params?.listFilter ?? "all";
+      const sf = params?.sourceFilter ?? "all";
+      const q = listFilterToQuery(lf);
+      const hasImportSource =
+        sf === "with_source" ? true : undefined;
       return await careerClientService.getCareerClients(
         params?.skip ?? 0,
         params?.limit ?? 20,
-        params?.hasEmailInformation,
-        params?.emailFoundError
+        q.hasEmailInformation,
+        q.emailFoundError,
+        hasImportSource
       );
     } catch (error: any) {
       return rejectWithValue(
@@ -60,11 +90,11 @@ const careerClientSlice = createSlice({
     setPage(state, action: PayloadAction<number>) {
       state.page = action.payload;
     },
-    setHasEmailFilter(state, action: PayloadAction<HasEmailFilter>) {
-      state.hasEmailFilter = action.payload;
+    setListFilter(state, action: PayloadAction<ClientListFilter>) {
+      state.listFilter = action.payload;
     },
-    setEmailFoundErrorFilter(state, action: PayloadAction<EmailFoundErrorFilter>) {
-      state.emailFoundErrorFilter = action.payload;
+    setSourceFilter(state, action: PayloadAction<SourceFilter>) {
+      state.sourceFilter = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -86,6 +116,6 @@ const careerClientSlice = createSlice({
   },
 });
 
-export const { setPage, setHasEmailFilter, setEmailFoundErrorFilter } =
+export const { setPage, setListFilter, setSourceFilter } =
   careerClientSlice.actions;
 export default careerClientSlice.reducer;

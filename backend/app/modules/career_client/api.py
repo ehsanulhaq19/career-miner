@@ -10,6 +10,8 @@ from app.modules.career_client.schemas import (
     CareerClientBulkEmailSendRequest,
     CareerClientBulkUpdate,
     CareerClientEmailRowsListResponse,
+    CareerClientImportRequest,
+    CareerClientImportResponse,
     CareerClientListResponse,
     CareerClientLocationsResponse,
     CareerClientResponse,
@@ -26,6 +28,7 @@ from app.modules.career_client.service import (
     get_career_client_by_id,
     get_career_client_locations,
     get_career_client_outreach_email_logs,
+    import_career_clients,
     list_career_client_email_rows,
     list_career_clients,
     remove_invalid_emails,
@@ -114,17 +117,35 @@ async def list_career_clients_endpoint(
     limit: int = Query(20, ge=1, le=500),
     has_email_information: bool | None = Query(None),
     email_found_error: bool | None = Query(None),
+    has_import_source: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CareerClientListResponse:
-    """List active career clients with pagination in descending order."""
+    """
+    List active career clients with pagination in descending order.
+    Optional has_import_source filters rows that store an import source in meta_data.
+    """
     return await list_career_clients(
         db,
         skip=skip,
         limit=limit,
         has_email_information=has_email_information,
         email_found_error=email_found_error,
+        has_import_source=has_import_source,
     )
+
+
+@router.post("/import", response_model=CareerClientImportResponse)
+async def import_career_clients_endpoint(
+    body: CareerClientImportRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CareerClientImportResponse:
+    """
+    Import up to 100 clients for a named source; upsert by client name or website.
+    """
+    _ = current_user
+    return await import_career_clients(db, body)
 
 
 @router.get("/locations", response_model=CareerClientLocationsResponse)

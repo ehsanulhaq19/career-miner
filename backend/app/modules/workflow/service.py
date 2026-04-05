@@ -33,6 +33,7 @@ from app.modules.workflow.schemas import (
     WorkflowListResponse,
     WorkflowLogResponse,
     WorkflowResponse,
+    WorkflowTaskInput,
     WorkflowTaskResponse,
     WorkflowUpdateRequest,
 )
@@ -570,6 +571,30 @@ async def delete_workflow_task_svc(
     if not ok:
         raise NotFoundException(detail="Workflow task not found")
     await db.commit()
+
+
+async def add_workflow_task_svc(
+    db: AsyncSession,
+    workflow_id: int,
+    body: WorkflowTaskInput,
+    user_id: int,
+) -> WorkflowTaskResponse:
+    """Create a new task row on an existing workflow."""
+    wf = await workflow_crud.get_workflow_by_id(db, workflow_id)
+    if wf is None or wf.user_id != user_id:
+        raise NotFoundException(detail="Workflow not found")
+    row = await workflow_crud.create_workflow_task(
+        db,
+        {
+            "workflow_id": workflow_id,
+            "linked_task_model": body.linked_task_model,
+            "linked_task_model_data": body.linked_task_model_data or {},
+            "priority": body.priority,
+            "is_active": body.is_active,
+        },
+    )
+    await db.commit()
+    return WorkflowTaskResponse.model_validate(row)
 
 
 async def update_workflow_task_svc(

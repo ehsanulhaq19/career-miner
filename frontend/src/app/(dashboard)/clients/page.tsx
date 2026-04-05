@@ -1,21 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  HiOutlineChevronDown,
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
-  HiOutlineEnvelope,
   HiOutlineMagnifyingGlassCircle,
   HiOutlinePencilSquare,
   HiOutlineUserGroup,
   HiOutlineTrash,
+  HiOutlineEnvelope,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchCareerClients,
-  setEmailFoundErrorFilter,
-  setHasEmailFilter,
+  type ClientListFilter,
+  type SourceFilter,
+  setListFilter,
   setPage,
+  setSourceFilter,
 } from "@/store/slices/careerClientSlice";
 import { CareerClient } from "@/types";
 import ClientDetailModal from "@/components/ClientDetailModal";
@@ -23,10 +26,11 @@ import BulkEditModal from "@/components/BulkEditModal";
 import ScanClientsModal from "@/components/ScanClientsModal";
 import CleanEmailsModal from "@/components/CleanEmailsModal";
 import BulkCareerClientEmailModal from "@/components/BulkCareerClientEmailModal";
+import ImportClientsModal from "@/components/ImportClientsModal";
 
 export default function ClientsPage() {
   const dispatch = useAppDispatch();
-  const { items, total, page, limit, hasEmailFilter, emailFoundErrorFilter, loading } =
+  const { items, total, page, limit, listFilter, sourceFilter, loading } =
     useAppSelector((state) => state.careerClient);
   const [selectedClient, setSelectedClient] = useState<CareerClient | null>(
     null
@@ -35,18 +39,30 @@ export default function ClientsPage() {
   const [scanModalOpen, setScanModalOpen] = useState(false);
   const [cleanEmailsOpen, setCleanEmailsOpen] = useState(false);
   const [bulkEmailOpen, setBulkEmailOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<
+    null | "bulk" | "actions" | "import"
+  >(null);
+  const bulkRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const importRef = useRef<HTMLDivElement>(null);
 
-  const getHasEmailParam = () => {
-    if (hasEmailFilter === "with") return true;
-    if (hasEmailFilter === "without") return false;
-    return undefined;
-  };
-
-  const getEmailFoundErrorParam = () => {
-    if (emailFoundErrorFilter === "yes") return true;
-    if (emailFoundErrorFilter === "no") return false;
-    return undefined;
-  };
+  useEffect(() => {
+    if (!openMenu) return;
+    const onDoc = (e: MouseEvent) => {
+      const n = e.target as Node;
+      if (
+        bulkRef.current?.contains(n) ||
+        actionsRef.current?.contains(n) ||
+        importRef.current?.contains(n)
+      ) {
+        return;
+      }
+      setOpenMenu(null);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [openMenu]);
 
   const refetch = () => {
     const skip = (page - 1) * limit;
@@ -54,8 +70,8 @@ export default function ClientsPage() {
       fetchCareerClients({
         skip,
         limit,
-        hasEmailInformation: getHasEmailParam(),
-        emailFoundError: getEmailFoundErrorParam(),
+        listFilter,
+        sourceFilter,
       })
     );
   };
@@ -66,27 +82,30 @@ export default function ClientsPage() {
       fetchCareerClients({
         skip,
         limit,
-        hasEmailInformation: getHasEmailParam(),
-        emailFoundError: getEmailFoundErrorParam(),
+        listFilter,
+        sourceFilter,
       })
     );
-  }, [dispatch, page, limit, hasEmailFilter, emailFoundErrorFilter]);
+  }, [dispatch, page, limit, listFilter, sourceFilter]);
 
   const totalPages = Math.ceil(total / limit);
 
-  const handleHasEmailFilterChange = (
-    value: "all" | "with" | "without"
-  ) => {
-    dispatch(setHasEmailFilter(value));
+  const handleListFilterChange = (value: ClientListFilter) => {
+    dispatch(setListFilter(value));
     dispatch(setPage(1));
   };
 
-  const handleEmailFoundErrorFilterChange = (
-    value: "all" | "yes" | "no"
-  ) => {
-    dispatch(setEmailFoundErrorFilter(value));
+  const handleSourceFilterChange = (value: SourceFilter) => {
+    dispatch(setSourceFilter(value));
     dispatch(setPage(1));
   };
+
+  const menuBtn =
+    "flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors";
+  const menuPanel =
+    "absolute right-0 mt-1 min-w-[11rem] py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-20";
+  const menuItem =
+    "w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/80";
 
   return (
     <div className="space-y-6">
@@ -94,60 +113,143 @@ export default function ClientsPage() {
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
           Clients
         </h2>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setBulkEmailOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <HiOutlineEnvelope className="w-4 h-4" />
-            Bulk email
-          </button>
-          <button
-            onClick={() => setScanModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <HiOutlineMagnifyingGlassCircle className="w-4 h-4" />
-            Scan Clients
-          </button>
-          <button
-            onClick={() => setCleanEmailsOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <HiOutlineTrash className="w-4 h-4" />
-            Clean Emails
-          </button>
-          <button
-            onClick={() => setBulkEditOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <HiOutlinePencilSquare className="w-4 h-4" />
-            Bulk Edit
-          </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative" ref={bulkRef}>
+            <button
+              type="button"
+              className={menuBtn}
+              onClick={() =>
+                setOpenMenu((m) => (m === "bulk" ? null : "bulk"))
+              }
+            >
+              Bulk actions
+              <HiOutlineChevronDown className="w-4 h-4 opacity-70" />
+            </button>
+            {openMenu === "bulk" && (
+              <div className={menuPanel}>
+                <button
+                  type="button"
+                  className={menuItem}
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setBulkEmailOpen(true);
+                  }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <HiOutlineEnvelope className="w-4 h-4" />
+                    Bulk email
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={menuItem}
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setBulkEditOpen(true);
+                  }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <HiOutlinePencilSquare className="w-4 h-4" />
+                    Bulk edit
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="relative" ref={actionsRef}>
+            <button
+              type="button"
+              className={menuBtn}
+              onClick={() =>
+                setOpenMenu((m) => (m === "actions" ? null : "actions"))
+              }
+            >
+              Actions
+              <HiOutlineChevronDown className="w-4 h-4 opacity-70" />
+            </button>
+            {openMenu === "actions" && (
+              <div className={menuPanel}>
+                <button
+                  type="button"
+                  className={menuItem}
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setScanModalOpen(true);
+                  }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <HiOutlineMagnifyingGlassCircle className="w-4 h-4" />
+                    Scan clients
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={menuItem}
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setCleanEmailsOpen(true);
+                  }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <HiOutlineTrash className="w-4 h-4" />
+                    Clean emails
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="relative" ref={importRef}>
+            <button
+              type="button"
+              className={menuBtn}
+              onClick={() =>
+                setOpenMenu((m) => (m === "import" ? null : "import"))
+              }
+            >
+              Import
+              <HiOutlineChevronDown className="w-4 h-4 opacity-70" />
+            </button>
+            {openMenu === "import" && (
+              <div className={menuPanel}>
+                <button
+                  type="button"
+                  className={menuItem}
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setImportOpen(true);
+                  }}
+                >
+                  CSV
+                </button>
+              </div>
+            )}
+          </div>
+
           <select
-            value={hasEmailFilter}
+            value={listFilter}
             onChange={(e) =>
-              handleHasEmailFilterChange(
-                e.target.value as "all" | "with" | "without"
-              )
+              handleListFilterChange(e.target.value as ClientListFilter)
             }
             className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
           >
             <option value="all">All clients</option>
-            <option value="with">With emails</option>
-            <option value="without">Without emails</option>
+            <option value="with_email">With emails</option>
+            <option value="without_email">Without emails</option>
+            <option value="scrape_failed">Email scrape failed</option>
+            <option value="scrape_ok">Email scrape OK</option>
           </select>
+
           <select
-            value={emailFoundErrorFilter}
+            value={sourceFilter}
             onChange={(e) =>
-              handleEmailFoundErrorFilterChange(
-                e.target.value as "all" | "yes" | "no"
-              )
+              handleSourceFilterChange(e.target.value as SourceFilter)
             }
             className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
           >
-            <option value="all">Email scrape: any</option>
-            <option value="yes">Email scrape failed</option>
-            <option value="no">Email scrape OK</option>
+            <option value="all">All sources</option>
+            <option value="with_source">Has import source</option>
           </select>
         </div>
       </div>
@@ -237,6 +339,12 @@ export default function ClientsPage() {
         isOpen={bulkEmailOpen}
         onClose={() => setBulkEmailOpen(false)}
       />
+      <ImportClientsModal
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={refetch}
+        initialFileType="csv"
+      />
     </div>
   );
 }
@@ -248,6 +356,11 @@ function ClientCard({
   client: CareerClient;
   onClick: () => void;
 }) {
+  const src =
+    typeof client.meta_data?.source === "string"
+      ? client.meta_data.source.trim()
+      : "";
+
   return (
     <div
       role="button"
@@ -264,6 +377,11 @@ function ClientCard({
       <h3 className="font-semibold text-gray-900 dark:text-white line-clamp-1 mb-2">
         {client.name || "Unnamed Client"}
       </h3>
+      {src ? (
+        <p className="text-xs font-medium text-primary-700 dark:text-primary-300 mb-2">
+          Source: {src}
+        </p>
+      ) : null}
       {client.meta_data?.email_found_error === true && (
         <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-2">
           Email fetch failed
@@ -285,6 +403,7 @@ function ClientCard({
             <a
               key={email}
               href={`mailto:${email}`}
+              onClick={(e) => e.stopPropagation()}
               className="text-xs text-primary-600 dark:text-primary-400 hover:underline truncate max-w-full"
             >
               {email}
@@ -302,6 +421,7 @@ function ClientCard({
           href={client.official_website}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
           className="mt-2 block text-xs text-primary-600 dark:text-primary-400 hover:underline truncate"
         >
           {client.official_website}
@@ -312,6 +432,7 @@ function ClientCard({
           href={client.link}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
           className="mt-2 block text-xs text-primary-600 dark:text-primary-400 hover:underline truncate"
         >
           {client.link}

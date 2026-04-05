@@ -148,6 +148,14 @@ export const workflowService = {
     return data;
   },
 
+  async addWorkflowTask(workflowId: number, payload: WorkflowTaskInputPayload) {
+    const { data } = await api.post<WorkflowTask>(
+      `/workflows/${workflowId}/tasks`,
+      payload
+    );
+    return data;
+  },
+
   async runWorkflow(id: number) {
     const { data } = await api.post<{ status: string; workflow_id: number }>(
       `/workflows/${id}/run`

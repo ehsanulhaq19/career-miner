@@ -1,12 +1,22 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from typing import Any
+
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class CareerClientUpdate(BaseModel):
     """Schema for updating an existing career client."""
 
     emails: list[str] | None = None
+    phone_numbers: list[str] | None = None
     name: str | None = None
     official_website: str | None = None
     location: str | None = None
@@ -28,6 +38,7 @@ class CareerClientResponse(BaseModel):
 
     id: int
     emails: list[str] = []
+    phone_numbers: list[str] = []
     official_website: str | None = None
     name: str | None
     location: str | None
@@ -38,6 +49,13 @@ class CareerClientResponse(BaseModel):
     scrap_client_job_id: int | None = None
     is_active: bool
     created_at: datetime
+
+    @field_validator("phone_numbers", mode="before")
+    @classmethod
+    def default_phone_numbers(cls, v: Any) -> list:
+        if v is None:
+            return []
+        return v
 
 
 class CareerClientListResponse(BaseModel):
@@ -177,3 +195,63 @@ class BulkCareerClientEmailSendLogListResponse(BaseModel):
     """Schema for list of bulk career client email send logs."""
 
     items: list[BulkCareerClientEmailSendLogResponse]
+
+
+class CareerClientImportItem(BaseModel):
+    """Single client row accepted by the import API."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    emails: list[str] = Field(default_factory=list)
+    official_website: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("official_website", "offical_website"),
+    )
+    name: str | None = None
+    location: str | None = None
+    detail: str | None = None
+    phone_numbers: list[str] = Field(default_factory=list)
+
+    @field_validator("emails", "phone_numbers", mode="before")
+    @classmethod
+    def coerce_string_or_list(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return []
+            parts = []
+            for sep in ("\n", ";", ","):
+                if sep in stripped:
+                    parts = [p.strip() for p in stripped.split(sep) if p.strip()]
+                    break
+            if not parts:
+                parts = [stripped]
+            return [str(p) for p in parts]
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if x is not None and str(x).strip()]
+        return []
+
+
+class CareerClientImportRequest(BaseModel):
+    """Request body for bulk import of career clients."""
+
+    source: str = Field(min_length=1, max_length=500)
+    clients: list[dict[str, Any]] = Field(min_length=1, max_length=100)
+
+
+class CareerClientImportErrorItem(BaseModel):
+    """Describes one failed import row."""
+
+    index: int
+    record: dict[str, Any]
+    message: str
+
+
+class CareerClientImportResponse(BaseModel):
+    """Result of a career client import batch."""
+
+    created_count: int
+    updated_count: int
+    errors: list[CareerClientImportErrorItem]

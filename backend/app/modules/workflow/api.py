@@ -10,11 +10,13 @@ from app.modules.workflow.schemas import (
     WorkflowExecutionDetailResponse,
     WorkflowExecutionListResponse,
     WorkflowListResponse,
+    WorkflowTaskInput,
     WorkflowTaskResponse,
     WorkflowTaskUpdateRequest,
     WorkflowUpdateRequest,
 )
 from app.modules.workflow.service import (
+    add_workflow_task_svc,
     create_workflow_svc,
     delete_workflow_task_svc,
     get_execution_detail_svc,
@@ -48,6 +50,21 @@ async def update_workflow_endpoint(
 ) -> WorkflowDetailResponse:
     """Update workflow name, schedule interval, active flag, or meta_data."""
     return await update_workflow_svc(db, workflow_id, body, current_user.id)
+
+
+@router.post(
+    "/{workflow_id}/tasks",
+    response_model=WorkflowTaskResponse,
+    status_code=201,
+)
+async def add_workflow_task_endpoint(
+    workflow_id: int,
+    body: WorkflowTaskInput,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WorkflowTaskResponse:
+    """Append a new task template to an existing workflow."""
+    return await add_workflow_task_svc(db, workflow_id, body, current_user.id)
 
 
 @router.delete("/{workflow_id}/tasks/{task_id}", status_code=204)

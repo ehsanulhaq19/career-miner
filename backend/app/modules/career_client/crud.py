@@ -28,6 +28,27 @@ def _apply_email_found_error_filter(query, email_found_error: bool | None):
     )
 
 
+def _apply_has_import_source_filter(query, has_import_source: bool | None):
+    """
+    When True, keep rows whose meta_data defines a non-empty source.
+    When False, keep rows with no import source. When None, no filter.
+    """
+    if has_import_source is None:
+        return query
+    if has_import_source is True:
+        return query.where(
+            text(
+                "(career_clients.meta_data->>'source') IS NOT NULL "
+                "AND trim(career_clients.meta_data->>'source') != ''"
+            )
+        )
+    return query.where(
+        text(
+            "coalesce(trim(career_clients.meta_data->>'source'), '') = ''"
+        )
+    )
+
+
 def _apply_has_email_filter(query, has_email_information: bool | None):
     """
     Apply email filter to query based on has_email_information.
@@ -67,6 +88,7 @@ async def get_career_clients(
     limit: int = 20,
     has_email_information: bool | None = None,
     email_found_error: bool | None = None,
+    has_import_source: bool | None = None,
 ) -> tuple[list[CareerClient], int]:
     """Retrieve a paginated list of active career clients in descending order by id."""
     base_query = (
@@ -76,6 +98,7 @@ async def get_career_clients(
     )
     base_query = _apply_has_email_filter(base_query, has_email_information)
     base_query = _apply_email_found_error_filter(base_query, email_found_error)
+    base_query = _apply_has_import_source_filter(base_query, has_import_source)
     query = base_query.offset(skip).limit(limit)
 
     count_query = select(func.count(CareerClient.id)).where(
@@ -91,6 +114,7 @@ async def get_career_clients(
             | (CareerClient.emails.is_(None))
         )
     count_query = _apply_email_found_error_filter(count_query, email_found_error)
+    count_query = _apply_has_import_source_filter(count_query, has_import_source)
 
     result = await db.execute(query)
     items = list(result.scalars().all())
@@ -133,6 +157,67 @@ async def get_career_client_by_name(
         select(CareerClient).where(CareerClient.name == name.strip())
     )
     return result.scalars().first()
+
+
+async def get_career_client_by_normalized_host(
+    db: AsyncSession,
+    normalized_host: str,
+) -> CareerClient | None:
+    """
+    Find a career client whose official_website normalizes to the same host key.
+    """
+    if not normalized_host or not str(normalized_host).strip():
+        return None
+    host = str(normalized_host).strip().lower()
+    stmt = text(
+        """
+        SELECT id FROM career_clients
+        WHERE official_website IS NOT NULL
+          AND trim(official_website) != ''
+          AND lower(
+            regexp_replace(
+              regexp_replace(
+                split_part(
+                  regexp_replace(trim(official_website), '^https?://', '', 'gi'),
+                  '/',
+                  1
+                ),
+                '^www\\.',
+                '',
+                'i'
+              ),
+              '/$',
+              ''
+            )
+          ) = :host
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).bindparams(host=host)
+    result = await db.execute(stmt)
+    row = result.first()
+    if row is None:
+        return None
+    return await get_career_client_by_id(db, int(row[0]))
+
+
+async def find_career_client_for_import(
+    db: AsyncSession,
+    name: str | None,
+    normalized_website_host: str | None,
+) -> CareerClient | None:
+    """
+    Resolve an existing career client by exact name or by normalized website host.
+    """
+    if name and str(name).strip():
+        found = await get_career_client_by_name(db, name)
+        if found is not None:
+            return found
+    if normalized_website_host:
+        return await get_career_client_by_normalized_host(
+            db, normalized_website_host
+        )
+    return None
 
 
 async def create_career_client(db: AsyncSession, data: dict) -> CareerClient:
