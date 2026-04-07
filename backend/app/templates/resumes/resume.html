@@ -10,129 +10,226 @@
             margin: 1.5cm;
         }
         body {
-            font-family: 'Georgia', 'Times New Roman', serif;
-            font-size: 11pt;
-            line-height: 1.4;
-            color: #333;
+            font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif;
+            font-size: 10pt;
+            line-height: 1.15;
+            color: #000000;
             margin: 0;
             padding: 0;
         }
+        /* xhtml2pdf applies large default <p> margins; normalize for tight layouts */
+        p {
+            margin: 0;
+            padding: 0;
+        }
+        ul,
+        ol {
+            margin: 0;
+        }
         .header {
-            border-bottom: 2px solid #333;
-            padding-bottom: 12px;
-            margin-bottom: 16px;
+            margin-bottom: 2px;
         }
         .header h1 {
             margin: 0;
             font-size: 22pt;
             font-weight: bold;
+            color: #000000;
+            letter-spacing: -0.02em;
         }
         .header .title {
-            font-size: 12pt;
-            color: #555;
-            margin-top: 4px;
+            font-size: 11pt;
+            font-weight: normal;
+            color: #000000;
+            margin-top: 2px;
         }
-        .contact-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-top: 8px;
-            font-size: 10pt;
+        .contact-line {
+            margin-top: 6px;
+            font-size: 9.5pt;
+            color: #000000;
+            word-break: break-word;
         }
-        .contact-row span {
-            color: #444;
+        .header-rule {
+            border: none;
+            border-top: 1px solid #cccccc;
+            margin: 8px 0 6px 0;
         }
+        /*
+         * xhtml2pdf often drops or collapses margin between blocks; padding-top on
+         * .section is much more reliable for space above each new heading (Education,
+         * Certifications, Skills, etc.).
+         */
         .section {
-            margin-bottom: 16px;
+            margin: 0;
+            padding-top: 16pt;
+            box-sizing: border-box;
+            width: 100%;
+        }
+        .section:first-of-type {
+            padding-top: 8pt;
         }
         .section-title {
-            font-size: 12pt;
+            font-size: 10pt;
             font-weight: bold;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            border-bottom: 1px solid #999;
-            padding-bottom: 4px;
-            margin-bottom: 10px;
+            letter-spacing: 0.04em;
+            color: #666666;
+            margin: 0;
+            margin-bottom: 1pt;
+            padding: 10pt 0 1pt 0;
+            border-bottom: 1px solid #cccccc;
+            display: block;
+        }
+        .mb-0 {
+            margin-bottom: 0;
         }
         .summary {
             text-align: justify;
+            color: #000000;
+            margin: 0;
+            padding: 0;
+            line-height: 1.2;
+            margin-bottom: 8pt;
         }
-        .experience-item, .education-item, .project-item {
-            margin-bottom: 12px;
+        /*
+         * Flex + gap is unreliable in xhtml2pdf and can blow out vertical spacing.
+         * Table rows keep title/location and company/dates on two tight lines.
+         */
+        .row {
+            display: table;
+            width: 100%;
+            table-layout: fixed;
+            margin: 0;
+            padding: 0;
+            border-collapse: collapse;
+            line-height: 1.15;
         }
-        .item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            flex-wrap: wrap;
+        .row > span {
+            display: table-cell;
+            vertical-align: baseline;
         }
-        .item-title {
+        .row-left {
             font-weight: bold;
-            font-size: 11pt;
+            color: #000000;
+            width: 68%;
         }
-        .item-company, .item-institution {
-            font-style: italic;
-            color: #555;
+        .row-right {
+            font-weight: normal;
+            color: #666666;
+            text-align: right;
+            white-space: nowrap;
+            width: 32%;
         }
-        .item-location {
-            font-size: 10pt;
-            color: #666;
+        .row-sub-left {
+            font-weight: normal;
+            color: #007bff;
+            width: 68%;
         }
-        .item-duration {
-            font-size: 10pt;
-            color: #666;
+        .row-sub-left--plain {
+            color: #000000;
+        }
+        .experience-item .row:first-of-type,
+        .education-item .row:first-of-type,
+        .project-item .row:first-of-type {
+            margin-bottom: 0;
+        }
+        .experience-item,
+        .education-item,
+        .project-item {
+            margin-bottom: 3pt;
+            /* line-height: 1.15; */
+        }
+        .experience-item:first-child,
+        .education-item:first-child,
+        .project-item:first-child {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+        }
+
+        .experience-item:last-child,
+        .education-item:last-child,
+        .project-item:last-child {
+            margin-bottom: 0;
+        }
+        .item-meta {
+            margin-top: 4px;
+            color: #000000;
+            font-size: 9.5pt;
         }
         .item-description {
-            margin-top: 6px;
-            padding-left: 12px;
+            margin-top: 1pt;
+            padding-left: 0;
+            color: #000000;
         }
         .item-description ul {
-            margin: 4px 0;
-            padding-left: 16px;
+            margin: 0;
+            padding: 0 0 0 14px;
+            list-style-position: outside;
         }
-        .skills-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
+        .item-description li {
+            margin: 0;
+            padding: 0;
+            line-height: 1.15;
         }
-        .skill-tag {
-            background: #f0f0f0;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 10pt;
+        .item-description li::marker {
+            color: #666666;
         }
-        .certifications li, .key-achievements li {
-            margin-bottom: 6px;
+        .item-description.item-description--section-bullets ul li {
+            margin-top: 3pt;
+            margin-bottom: 3pt;
         }
-        .achievement-title {
+        .achievement-bullet-title {
+            color: #007bff;
             font-weight: bold;
+            display: block;
+            margin-bottom: 1pt;
         }
-        .item-tech-stack {
-            margin-top: 4px;
-            font-size: 10pt;
-            color: #666;
+        .achievement-bullet-body {
+            display: block;
+            color: #000000;
+            font-size: 9.5pt;
+            line-height: 1.15;
         }
+        .skills-paragraph {
+            color: #000000;
+            margin: 0;
+            text-align: left;
+        }
+        .project-tagline {
+            color: #000000;
+            font-size: 9.5pt;
+        }
+        .project-tech {
+            font-size: 9pt;
+            color: #666666;
+        }
+        .mt-0 {
+            margin-top: 0;
+        }
+        
     </style>
 </head>
 <body>
+    {% set pi = resume.get('personal_info', {}) or {} %}
     <div class="header">
-        {% set pi = resume.get('personal_info', {}) or {} %}
         <h1>{{ pi.get('name', '') }}</h1>
         {% if pi.get('title') %}
         <div class="title">{{ pi.get('title', '') }}</div>
         {% endif %}
-        <div class="contact-row">
-            {% if pi.get('email') %}<span>{{ pi.get('email', '') }}</span>{% endif %}
-            {% if pi.get('phone') %}<span>{{ pi.get('phone', '') }}</span>{% endif %}
-            {% if pi.get('location') %}<span>{{ pi.get('location', '') }}</span>{% endif %}
-            {% if pi.get('linkedin') %}<span>{{ pi.get('linkedin', '') }}</span>{% endif %}
+        <div class="contact-line">
+            {%- set parts = [] -%}
+            {%- if pi.get('phone') %}{% set parts = parts + [pi.get('phone', '')] %}{% endif -%}
+            {%- if pi.get('email') %}{% set parts = parts + [pi.get('email', '')] %}{% endif -%}
+            {%- if pi.get('linkedin') %}{% set parts = parts + [pi.get('linkedin', '')] %}{% endif -%}
+            {%- if pi.get('location') %}{% set parts = parts + [pi.get('location', '')] %}{% endif -%}
+            {{ parts | join(' ') }}
         </div>
+        <hr class="header-rule"/>
     </div>
 
     {% if resume.get('summary') %}
     <div class="section">
         <div class="section-title">Summary</div>
-        <div class="summary">{{ resume.get('summary', '') }}</div>
+        <p class="summary">{{ resume.get('summary', '') }}</p>
     </div>
     {% endif %}
 
@@ -142,14 +239,14 @@
         <div class="section-title">Experience</div>
         {% for exp in experiences %}
         <div class="experience-item">
-            <div class="item-header">
-                <span class="item-title">{{ exp.get('title', '') }}</span>
-                <span class="item-duration">{{ exp.get('duration', '') }}</span>
+            <div class="row">
+                <span class="row-left">{{ exp.get('title', '') }}</span>
+                <span class="row-right">{% if exp.get('location') %}{{ exp.get('location', '') }}{% endif %}</span>
             </div>
-            <div class="item-company">{{ exp.get('company', '') }}</div>
-            {% if exp.get('location') %}
-            <div class="item-location">{{ exp.get('location', '') }}</div>
-            {% endif %}
+            <div class="row">
+                <span class="row-sub-left">{{ exp.get('company', '') }}</span>
+                <span class="row-right">{{ exp.get('duration', '') }}</span>
+            </div>
             {% set desc = exp.get('description', []) or [] %}
             {% if desc %}
             <div class="item-description">
@@ -171,28 +268,31 @@
         <div class="section-title">Education</div>
         {% for edu in education %}
         <div class="education-item">
-            <div class="item-header">
-                <span class="item-title">{{ edu.get('degree', '') }}</span>
-                <span class="item-duration">{{ edu.get('duration', '') }}</span>
+            <div class="row">
+                <span class="row-left">{{ edu.get('degree', '') }}</span>
+                <span class="row-right">{% if edu.get('location') %}{{ edu.get('location', '') }}{% endif %}</span>
             </div>
-            <div class="item-institution">{{ edu.get('institution', '') }}</div>
-            {% if edu.get('location') %}
-            <div class="item-location">{{ edu.get('location', '') }}</div>
-            {% endif %}
+            <div class="row">
+                <span class="row-sub-left row-sub-left--plain">{{ edu.get('institution', '') }}</span>
+                <span class="row-right">{{ edu.get('duration', '') }}</span>
+            </div>
         </div>
         {% endfor %}
     </div>
     {% endif %}
 
     {% set certs = resume.get('certifications', []) or [] %}
+    {% set certs = certs | select | list %}
     {% if certs %}
     <div class="section">
         <div class="section-title">Certifications</div>
-        <ul>
-        {% for c in certs %}
+        <div class="item-description item-description--section-bullets">
+            <ul>
+            {% for c in certs %}
             {% if c %}<li>{{ c }}</li>{% endif %}
-        {% endfor %}
-        </ul>
+            {% endfor %}
+            </ul>
+        </div>
     </div>
     {% endif %}
 
@@ -200,28 +300,31 @@
     {% if achievements %}
     <div class="section">
         <div class="section-title">Key Achievements</div>
-        {% for a in achievements %}
-        <div class="experience-item">
-            {% if a.get('title') %}
-            <div class="achievement-title">{{ a.get('title', '') }}</div>
+        <div class="item-description item-description--section-bullets">
+            <ul>
+            {% for a in achievements %}
+            {% if a.get('title') or a.get('description') %}
+            <li>
+                {% if a.get('title') %}
+                <span class="achievement-bullet-title">{{ a.get('title', '') }}</span>
+                {% endif %}
+                {% if a.get('description') %}
+                <span class="achievement-bullet-body">{{ a.get('description', '') }}</span>
+                {% endif %}
+            </li>
             {% endif %}
-            {% if a.get('description') %}
-            <div>{{ a.get('description', '') }}</div>
-            {% endif %}
+            {% endfor %}
+            </ul>
         </div>
-        {% endfor %}
     </div>
     {% endif %}
 
     {% set skills = resume.get('skills', []) or [] %}
+    {% set skills = skills | select | list %}
     {% if skills %}
     <div class="section">
         <div class="section-title">Skills</div>
-        <div class="skills-list">
-        {% for s in skills %}
-            {% if s %}<span class="skill-tag">{{ s }}</span>{% endif %}
-        {% endfor %}
-        </div>
+        <p class="skills-paragraph">{{ skills | join(', ') }}</p>
     </div>
     {% endif %}
 
@@ -231,15 +334,27 @@
         <div class="section-title">Projects</div>
         {% for proj in projects %}
         <div class="project-item">
-            <div class="item-header">
-                <span class="item-title">{{ proj.get('name', '') }}</span>
-                <span class="item-duration">{{ proj.get('duration', '') }}</span>
+            <div class="row">
+                <span class="row-left">{{ proj.get('name', '') }}</span>
+                <span class="row-right">{{ proj.get('duration', '') }}</span>
             </div>
             {% if proj.get('description') %}
-            <div class="item-description">{{ proj.get('description', '') }}</div>
+            {% set desc_raw = proj.get('description', '') %}
+            {% set desc_lines = desc_raw.split('\n') | map('trim') | select | list %}
+            {% if desc_lines | length > 1 %}
+            <div class="item-description">
+                <ul>
+                    {% for line in desc_lines %}
+                    <li>{{ line }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% else %}
+            <div class="project-tagline">{{ desc_raw }}</div>
+            {% endif %}
             {% endif %}
             {% if proj.get('tech_stack') %}
-            <div class="item-tech-stack">{{ proj.get('tech_stack', '') }}</div>
+            <div class="project-tech"><b>Skills:</b> {{ proj.get('tech_stack', '') }}</div>
             {% endif %}
         </div>
         {% endfor %}
