@@ -32,6 +32,7 @@ from app.modules.scrap_client.crud import (
 )
 from app.modules.scrap_client.models import ScrapClientJobStatus
 from app.modules.scrap_client.schemas import (
+    ScrapClientDetailsStartRequest,
     ScrapClientJobListResponse,
     ScrapClientJobResponse,
     ScrapClientLogListResponse,
@@ -40,6 +41,12 @@ from app.modules.scrap_client.schemas import (
     ScrapClientStatusResponse,
     TestScrapClientRequest,
     TestScrapClientSiteRequest,
+)
+from app.modules.scrap_client.services.company_details_discovery import (
+    clip_detail_for_storage,
+    clip_location_for_storage,
+    discover_company_profile,
+    parse_size_headcount_for_storage,
 )
 from app.modules.scrap_client.services.email_extractor import extract_emails_from_html
 from app.modules.scrap_client.services.email_pattern_generator import (
@@ -453,7 +460,7 @@ async def _run_client_email_scraper(
             details="Background scraper task started",
             meta_data={
                 "client_ids": client_ids,
-                "only_without_emails": only_clients_without_emails,
+                "only_clients_without_emails": only_clients_without_emails,
                 "is_test_mode": is_test_mode,
             },
         )
@@ -728,24 +735,16 @@ async def start_scrap_client_job(
 ) -> ScrapClientJobResponse:
     """
     Create and start a new scrap client job for email fetching.
-    Requires client_ids or only_clients_without_emails.
-    When client_ids are set, assigns scrap_client_job_id on those career clients before the worker runs.
+    Requires non-empty client_ids. Assigns scrap_client_job_id on those career clients before the worker runs.
     """
-    if not request.client_ids and not request.only_clients_without_emails:
-        raise BadRequestException(
-            detail="Provide client_ids or set only_clients_without_emails to True"
-        )
-
     active = await get_active_scrap_client_jobs(db)
     if active:
         raise BadRequestException(
             detail="An active scrap client job already exists"
         )
 
-    meta_data = {
-        "client_ids": request.client_ids,
-        "only_clients_without_emails": request.only_clients_without_emails,
-    }
+    ids = list(dict.fromkeys(int(x) for x in request.client_ids))
+    meta_data: dict = {"client_ids": ids}
     scrap_job = await create_scrap_client_job(
         db,
         {
@@ -754,15 +753,319 @@ async def start_scrap_client_job(
             "meta_data": meta_data,
         },
     )
-    if request.client_ids:
-        await assign_scrap_client_job_to_career_clients(
-            db, request.client_ids, scrap_job.id
-        )
+    await assign_scrap_client_job_to_career_clients(db, ids, scrap_job.id)
     response = ScrapClientJobResponse.model_validate(scrap_job)
     await broadcast_scrap_client_status(
         response.model_dump(), ScrapClientJobStatus.PENDING.value
     )
     return response
+
+
+async def start_scrap_client_details_job(
+    db: AsyncSession,
+    request: ScrapClientDetailsStartRequest,
+) -> ScrapClientJobResponse:
+    """
+    Create and start a job that enriches company profile fields for the given career clients.
+    Assigns scrap_client_job_id on those clients before the background worker runs.
+    """
+    active = await get_active_scrap_client_jobs(db)
+    if active:
+        raise BadRequestException(
+            detail="An active scrap client job already exists"
+        )
+
+    ids = list(dict.fromkeys(int(x) for x in request.client_ids))
+    meta_data: dict = {
+        "client_ids": ids,
+        "job_kind": "client_details",
+    }
+    scrap_job = await create_scrap_client_job(
+        db,
+        {
+            "name": f"client_details_{int(datetime.now(timezone.utc).timestamp())}",
+            "status": ScrapClientJobStatus.PENDING.value,
+            "meta_data": meta_data,
+        },
+    )
+    await assign_scrap_client_job_to_career_clients(db, ids, scrap_job.id)
+    response = ScrapClientJobResponse.model_validate(scrap_job)
+    await broadcast_scrap_client_status(
+        response.model_dump(), ScrapClientJobStatus.PENDING.value
+    )
+    return response
+
+
+async def _run_client_details_scraper(scrap_client_job_id: int) -> None:
+    """
+    Background worker that enriches career client detail, location, and size from web sources.
+    Uses DuckDuckGo HTML snippets first, then Gemini web search when snippets are insufficient.
+    """
+    try:
+        await _create_log_and_broadcast(
+            scrap_client_job_id,
+            "job_started",
+            progress=0,
+            status="in_progress",
+            details="Client details enrichment started",
+            meta_data={"job_kind": "client_details"},
+        )
+    except Exception as e:
+        logger.warning("Could not create job_started log: %s", e)
+
+    async def is_stopped() -> bool:
+        """Return True when the job has been stopped by the user."""
+        async with async_session() as s:
+            j = await get_scrap_client_job_by_id(s, scrap_client_job_id)
+            return j is not None and j.status == ScrapClientJobStatus.STOPPED.value
+
+    async with async_session() as db:
+        try:
+            job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
+            if job is None:
+                logger.warning("Job %s not found, exiting", scrap_client_job_id)
+                return
+
+            meta = job.meta_data or {}
+            raw_ids = meta.get("client_ids") or []
+            if not raw_ids:
+                await update_scrap_client_job_status(
+                    db, scrap_client_job_id, ScrapClientJobStatus.ERROR
+                )
+                await db.commit()
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    "job_error",
+                    status="error",
+                    details="No client_ids on job",
+                )
+                return
+
+            clients: list = []
+            for cid in raw_ids:
+                c = await get_career_client_by_id(db, int(cid))
+                if c and c.name:
+                    clients.append(c)
+
+            total = len(clients)
+            if total == 0:
+                await update_scrap_client_job_status(
+                    db, scrap_client_job_id, ScrapClientJobStatus.COMPLETED
+                )
+                await update_scrap_client_job_meta_data(
+                    db, scrap_client_job_id, {"total": 0}
+                )
+                await db.commit()
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    "job_completed",
+                    progress=100,
+                    status="completed",
+                    details="No named clients to process",
+                    meta_data={"total": 0},
+                )
+                return
+
+            await update_scrap_client_job_status(
+                db, scrap_client_job_id, ScrapClientJobStatus.IN_PROGRESS
+            )
+            await update_scrap_client_job_meta_data(
+                db,
+                scrap_client_job_id,
+                {
+                    "total": total,
+                    "pending": total,
+                    "processing": 0,
+                    "completed": 0,
+                    "failed": 0,
+                },
+            )
+            await db.commit()
+
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "job_processing",
+                progress=0,
+                status="in_progress",
+                details=f"Processing {total} clients for profile enrichment",
+                meta_data={"total": total},
+            )
+
+            sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
+            completed = 0
+            failed = 0
+
+            async def log_step(
+                action: str,
+                details: str | None = None,
+                meta_data_log: dict | None = None,
+                status_log: str = "in_progress",
+            ) -> None:
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    action,
+                    progress=0,
+                    status=status_log,
+                    details=details,
+                    meta_data=meta_data_log,
+                )
+
+            async def process_one(client, index: int) -> None:
+                nonlocal completed, failed
+                if await is_stopped():
+                    return
+                async with sem:
+                    if await is_stopped():
+                        return
+
+                    cid = int(client.id)
+                    cname = str(client.name or "")
+                    site = getattr(client, "official_website", None)
+
+                    await _create_log_and_broadcast(
+                        scrap_client_job_id,
+                        f"client_details_queue_{cname}",
+                        progress=int(100 * (completed + failed) / total),
+                        status="in_progress",
+                        details=f"Enriching {index + 1}/{total}: {cname}",
+                        meta_data={"client_id": cid, "index": index},
+                    )
+
+                    profile = await discover_company_profile(
+                        cname,
+                        official_website=site if site else None,
+                        log_cb=log_step,
+                    )
+
+                    raw_detail = (profile.detail or "").strip()
+                    has_useful = len(raw_detail) >= 40
+
+                    detail_store = clip_detail_for_storage(profile.detail)
+                    location_store = clip_location_for_storage(profile.location)
+                    size_int = parse_size_headcount_for_storage(profile.size)
+
+                    payload: dict = {"scrap_client_job_id": scrap_client_job_id}
+                    if detail_store:
+                        payload["detail"] = detail_store
+                    if location_store:
+                        payload["location"] = location_store
+                    if size_int is not None:
+                        payload["size"] = str(size_int)
+
+                    async with async_session() as session:
+                        if await is_stopped():
+                            return
+                        fresh = await get_career_client_by_id(session, cid)
+                        if fresh is None:
+                            failed += 1
+                        elif has_useful and len(payload) > 1:
+                            base_meta: dict = {}
+                            if isinstance(fresh.meta_data, dict):
+                                base_meta = dict(fresh.meta_data)
+                            base_meta["company_found_error"] = False
+                            payload["meta_data"] = base_meta
+                            await update_career_client(session, cid, payload)
+                            await session.commit()
+                            completed += 1
+                        else:
+                            base_meta_fail: dict = {}
+                            if isinstance(fresh.meta_data, dict):
+                                base_meta_fail = dict(fresh.meta_data)
+                            base_meta_fail["company_found_error"] = True
+                            fail_payload: dict = {
+                                "meta_data": base_meta_fail,
+                                "scrap_client_job_id": scrap_client_job_id,
+                            }
+                            if location_store:
+                                fail_payload["location"] = location_store
+                            if size_int is not None:
+                                fail_payload["size"] = str(size_int)
+                            await update_career_client(session, cid, fail_payload)
+                            await session.commit()
+                            failed += 1
+
+                    job_meta = {
+                        "total": total,
+                        "pending": total - completed - failed,
+                        "processing": 0,
+                        "completed": completed,
+                        "failed": failed,
+                    }
+                    async with async_session() as mdb:
+                        await update_scrap_client_job_meta_data(
+                            mdb, scrap_client_job_id, job_meta
+                        )
+                        await mdb.commit()
+
+                    progress = int(100 * (completed + failed) / total)
+                    await _create_log_and_broadcast(
+                        scrap_client_job_id,
+                        f"client_details_done_{cname}",
+                        progress=progress,
+                        status="completed" if has_useful else "error",
+                        details=(
+                            f"Profile source={profile.source}"
+                            if has_useful
+                            else f"Insufficient profile data (source={profile.source})"
+                        ),
+                        meta_data={
+                            "client_id": cid,
+                            "source": profile.source,
+                            "success": has_useful,
+                        },
+                    )
+
+            for i, c in enumerate(clients):
+                await process_one(c, i)
+
+            async with async_session() as fdb:
+                j = await get_scrap_client_job_by_id(fdb, scrap_client_job_id)
+                if j and j.status != ScrapClientJobStatus.STOPPED.value:
+                    await update_scrap_client_job_status(
+                        fdb, scrap_client_job_id, ScrapClientJobStatus.COMPLETED
+                    )
+                await fdb.commit()
+                updated = await get_scrap_client_job_by_id(fdb, scrap_client_job_id)
+                if updated:
+                    await broadcast_scrap_client_status(
+                        ScrapClientJobResponse.model_validate(updated).model_dump(),
+                        updated.status,
+                    )
+
+            await _create_log_and_broadcast(
+                scrap_client_job_id,
+                "job_completed",
+                progress=100,
+                status="completed",
+                details=(
+                    f"Details job finished: {completed} succeeded, {failed} failed of {total}"
+                ),
+                meta_data={"completed": completed, "failed": failed, "total": total},
+            )
+
+        except Exception as e:
+            logger.exception(
+                "Client details job %s failed: %s", scrap_client_job_id, e
+            )
+            try:
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    "job_error",
+                    progress=0,
+                    status="error",
+                    details=str(e),
+                    meta_data={
+                        "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
+                    },
+                )
+            except Exception as log_err:
+                logger.warning("Could not create job_error log: %s", log_err)
+            async with async_session() as edb:
+                await update_scrap_client_job_status(
+                    edb, scrap_client_job_id, ScrapClientJobStatus.ERROR
+                )
+                await edb.commit()
 
 
 async def _run_client_url_scraper(

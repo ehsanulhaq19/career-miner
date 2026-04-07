@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import random
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -73,12 +74,44 @@ def _browser_headers() -> dict:
     return {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Dest": "document",
+    }
+
+
+def _duckduckgo_html_headers() -> dict:
+    """
+    Request headers for DuckDuckGo HTML lite search endpoint.
+    Referer, Origin, and client hints align with a browser navigation from duckduckgo.com
+    to reduce HTTP 403 responses from automated requests.
+    """
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,image/apng,*/*;q=0.8"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": "https://duckduckgo.com/",
+        "Origin": "https://duckduckgo.com",
+        "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-site",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
 
 
@@ -460,20 +493,70 @@ async def _strategy_duckduckgo_search(
     ]
     all_results: list[tuple[str, float]] = []
     seen_domains: set[str] = set()
+    settings = get_settings()
+    ddg_attempts = 3
 
     for query in queries:
-        try:
-            encoded = quote_plus(query)
-            url = f"{SEARCH_URL}?q={encoded}"
-            if log_cb:
-                await log_cb(
-                    "web_search_duckduckgo_query",
-                    f"Query: '{query}'",
-                    {"engine": "duckduckgo", "query": query},
-                    "in_progress",
+        encoded = quote_plus(query)
+        url = f"{SEARCH_URL}?q={encoded}"
+        if log_cb:
+            await log_cb(
+                "web_search_duckduckgo_query",
+                f"Query: '{query}'",
+                {"engine": "duckduckgo", "query": query},
+                "in_progress",
+            )
+        response: httpx.Response | None = None
+        for attempt in range(ddg_attempts):
+            await asyncio.sleep(
+                random.uniform(
+                    settings.CRAWL_DELAY_MIN_SECONDS,
+                    settings.CRAWL_DELAY_MAX_SECONDS,
                 )
-            response = await client.get(url)
-            response.raise_for_status()
+            )
+            try:
+                response = await client.get(url, headers=_duckduckgo_html_headers())
+                if response.status_code == 403:
+                    if attempt < ddg_attempts - 1:
+                        await asyncio.sleep(
+                            (2**attempt) * random.uniform(0.8, 1.2)
+                        )
+                        continue
+                response.raise_for_status()
+                break
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 403 and attempt < ddg_attempts - 1:
+                    await asyncio.sleep(
+                        (2**attempt) * random.uniform(0.8, 1.2)
+                    )
+                    continue
+                if log_cb:
+                    await log_cb(
+                        "web_search_duckduckgo_error",
+                        str(e),
+                        {
+                            "engine": "duckduckgo",
+                            "query": query,
+                            "error": str(e),
+                            "status": e.response.status_code,
+                        },
+                        "error",
+                    )
+                response = None
+                break
+            except Exception as e:
+                if log_cb:
+                    await log_cb(
+                        "web_search_duckduckgo_error",
+                        str(e),
+                        {"engine": "duckduckgo", "query": query, "error": str(e)},
+                        "error",
+                    )
+                response = None
+                break
+        if response is None:
+            continue
+        try:
             soup = BeautifulSoup(response.text, "lxml")
 
             links = soup.find_all("a", href=True)
@@ -499,7 +582,6 @@ async def _strategy_duckduckgo_search(
 
             if all_results:
                 break
-            await asyncio.sleep(0.5)
         except Exception as e:
             if log_cb:
                 await log_cb(

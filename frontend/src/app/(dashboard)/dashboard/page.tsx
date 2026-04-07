@@ -11,6 +11,7 @@ import {
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import { fetchDashboardStats } from "@/store/slices/dashboardSlice";
+import { DashboardAnalyticsSection } from "@/components/DashboardAnalyticsSection";
 
 function timeAgo(date: string | null): string {
   if (!date) return "Never";
@@ -261,6 +262,8 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      <DashboardAnalyticsSection />
     </div>
   );
 }

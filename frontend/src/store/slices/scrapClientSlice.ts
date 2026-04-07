@@ -49,18 +49,26 @@ export const fetchScrapClientJobs = createAsyncThunk(
 
 export const startScrapClientJob = createAsyncThunk(
   "scrapClient/start",
-  async (
-    params: {
-      client_ids?: number[] | null;
-      only_clients_without_emails?: boolean;
-    },
-    { rejectWithValue }
-  ) => {
+  async (params: { client_ids: number[] }, { rejectWithValue }) => {
     try {
       return await scrapClientService.startScrapClientJob(params);
     } catch (error: any) {
       return rejectWithValue(
         error.response?.data?.detail || "Failed to start scrap client job"
+      );
+    }
+  }
+);
+
+export const startScrapClientDetailsJob = createAsyncThunk(
+  "scrapClient/startDetails",
+  async (params: { client_ids: number[] }, { rejectWithValue }) => {
+    try {
+      return await scrapClientService.startScrapClientDetailsJob(params);
+    } catch (error: any) {
+      return rejectWithValue(
+        error.response?.data?.detail ||
+          "Failed to start client details scrap job"
       );
     }
   }
@@ -234,6 +242,15 @@ const scrapClientSlice = createSlice({
         }
       })
       .addCase(startScrapClientFromUrl.fulfilled, (state, action) => {
+        const exists = state.items.some(
+          (item) => item.id === action.payload.id
+        );
+        if (!exists) {
+          state.items.unshift(action.payload);
+          state.total += 1;
+        }
+      })
+      .addCase(startScrapClientDetailsJob.fulfilled, (state, action) => {
         const exists = state.items.some(
           (item) => item.id === action.payload.id
         );

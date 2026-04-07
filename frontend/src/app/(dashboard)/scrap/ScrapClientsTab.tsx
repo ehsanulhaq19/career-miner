@@ -11,11 +11,13 @@ import {
   HiOutlineChevronRight,
   HiOutlineGlobeAlt,
   HiOutlineWindow,
+  HiOutlineBuildingOffice2,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
 import {
   fetchScrapClientJobs,
   startScrapClientJob,
+  startScrapClientDetailsJob,
   startScrapClientFromSite,
   startScrapClientFromUrl,
   testScrapClientJob,
@@ -28,6 +30,9 @@ import { fetchCareerClients } from "@/store/slices/careerClientSlice";
 import { fetchClientSites } from "@/store/slices/clientSiteSlice";
 import { scrapClientService } from "@/services/scrapClientService";
 import { ScrapClientJob, ScrapClientLog, ScrapperFile } from "@/types";
+import ScrapClientPickerModal, {
+  ScrapClientPickerPurpose,
+} from "../scrap-clients/ScrapClientPickerModal";
 
 function getStatusBadgeClass(status: string): string {
   switch (status) {
@@ -64,12 +69,9 @@ export default function ScrapClientsTab() {
   } = useAppSelector((state) => state.scrapClient);
   const { items: careerClients } = useAppSelector((state) => state.careerClient);
   const { items: clientSites } = useAppSelector((state) => state.clientSite);
-  const [startModalOpen, setStartModalOpen] = useState(false);
-  const [startForm, setStartForm] = useState({
-    client_ids: [] as number[],
-    only_clients_without_emails: false,
-  });
-  const [starting, setStarting] = useState(false);
+  const [pickModalOpen, setPickModalOpen] = useState(false);
+  const [pickModalPurpose, setPickModalPurpose] =
+    useState<ScrapClientPickerPurpose>("emails");
   const [actioningId, setActioningId] = useState<number | null>(null);
   const [toast, setToast] = useState<{
     type: "success" | "error";
@@ -82,6 +84,7 @@ export default function ScrapClientsTab() {
   );
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testForm, setTestForm] = useState({
+    client_site_id: 0,
     client_ids: [] as number[],
     only_clients_without_emails: false,
     url: "",
@@ -123,37 +126,6 @@ export default function ScrapClientsTab() {
       return () => clearTimeout(timer);
     }
   }, [toast]);
-
-  const handleStart = async () => {
-    const hasClientIds = startForm.client_ids.length > 0;
-    const onlyWithout = startForm.only_clients_without_emails;
-    if (!hasClientIds && !onlyWithout) {
-      setToast({
-        type: "error",
-        text: "Select client IDs or enable 'Only clients without emails'",
-      });
-      return;
-    }
-    setStarting(true);
-    try {
-      await dispatch(
-        startScrapClientJob({
-          client_ids: hasClientIds ? startForm.client_ids : null,
-          only_clients_without_emails: onlyWithout,
-        })
-      ).unwrap();
-      setToast({ type: "success", text: "Scrap client job started." });
-      setStartModalOpen(false);
-      setStartForm({ client_ids: [], only_clients_without_emails: false });
-      dispatch(fetchScrapClientJobs({ limit: 100 }));
-    } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : "Failed to start scrap client job.";
-      setToast({ type: "error", text: msg });
-    } finally {
-      setStarting(false);
-    }
-  };
 
   const handleStop = async (job: ScrapClientJob) => {
     setActioningId(job.id);
@@ -290,7 +262,12 @@ export default function ScrapClientsTab() {
       ).unwrap();
       setToast({ type: "success", text: "Test scrap client job started." });
       setTestModalOpen(false);
-      setTestForm({ client_ids: [], only_clients_without_emails: false, url: "" });
+      setTestForm({
+        client_site_id: 0,
+        client_ids: [],
+        only_clients_without_emails: false,
+        url: "",
+      });
       dispatch(fetchScrapClientJobs({ limit: 100 }));
     } catch (err: unknown) {
       const msg =
@@ -301,15 +278,6 @@ export default function ScrapClientsTab() {
     } finally {
       setTestSubmitting(false);
     }
-  };
-
-  const toggleStartClient = (clientId: number) => {
-    setStartForm((f) => ({
-      ...f,
-      client_ids: f.client_ids.includes(clientId)
-        ? f.client_ids.filter((id) => id !== clientId)
-        : [...f.client_ids, clientId],
-    }));
   };
 
   const toggleTestClient = (clientId: number) => {
@@ -346,9 +314,6 @@ export default function ScrapClientsTab() {
     });
   };
 
-  const canStart =
-    (startForm.client_ids.length > 0 || startForm.only_clients_without_emails) &&
-    !starting;
   const hasActiveJob = items.some(
     (j) => j.status === "pending" || j.status === "in_progress"
   );
@@ -414,7 +379,8 @@ export default function ScrapClientsTab() {
                   </button>
                   <button
                     onClick={() => {
-                      setStartModalOpen(true);
+                      setPickModalPurpose("emails");
+                      setPickModalOpen(true);
                       setScrapDropdownOpen(false);
                     }}
                     disabled={hasActiveJob}
@@ -422,6 +388,18 @@ export default function ScrapClientsTab() {
                   >
                     <HiOutlinePlay className="w-4 h-4" />
                     Start Scrap Job (emails)
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPickModalPurpose("details");
+                      setPickModalOpen(true);
+                      setScrapDropdownOpen(false);
+                    }}
+                    disabled={hasActiveJob}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    <HiOutlineBuildingOffice2 className="w-4 h-4" />
+                    Scrap client details
                   </button>
                 </div>
               </>
@@ -583,84 +561,32 @@ export default function ScrapClientsTab() {
         </div>
       )}
 
-      {startModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => !starting && setStartModalOpen(false)}
-        >
-          <div
-            className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-md w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Start Scrap Client Job
-              </h3>
-            </div>
-            <div className="p-6 space-y-4 overflow-y-auto flex-1">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Client IDs (optional - leave empty to use filter below)
-                </label>
-                <div className="max-h-40 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg p-2 space-y-1">
-                  {careerClients.slice(0, 100).map((c) => (
-                    <label
-                      key={c.id}
-                      className="flex items-center gap-2 cursor-pointer text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={startForm.client_ids.includes(c.id)}
-                        onChange={() => toggleStartClient(c.id)}
-                        className="rounded border-gray-300 dark:border-gray-600 text-primary-600"
-                      />
-                      <span className="text-gray-900 dark:text-white truncate">
-                        {c.name || `Client #${c.id}`}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="start_only_without_emails"
-                  checked={startForm.only_clients_without_emails}
-                  onChange={(e) =>
-                    setStartForm((f) => ({
-                      ...f,
-                      only_clients_without_emails: e.target.checked,
-                    }))
-                  }
-                  className="rounded border-gray-300 dark:border-gray-600 text-primary-600 focus:ring-primary-500"
-                />
-                <label
-                  htmlFor="start_only_without_emails"
-                  className="text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  Only clients without emails
-                </label>
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
-              <button
-                onClick={() => !starting && setStartModalOpen(false)}
-                disabled={starting}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleStart}
-                disabled={!canStart}
-                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {starting ? "Starting..." : "Start"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ScrapClientPickerModal
+        open={pickModalOpen}
+        purpose={pickModalPurpose}
+        onClose={() => setPickModalOpen(false)}
+        hasActiveJob={hasActiveJob}
+        onComplete={() => {
+          setToast({
+            type: "success",
+            text:
+              pickModalPurpose === "emails"
+                ? "Scrap client job started."
+                : "Client details scrap job started.",
+          });
+          dispatch(fetchScrapClientJobs({ limit: 100 }));
+        }}
+        onStartError={(text) => setToast({ type: "error", text })}
+        startJob={async (clientIds) => {
+          if (pickModalPurpose === "emails") {
+            await dispatch(startScrapClientJob({ client_ids: clientIds })).unwrap();
+          } else {
+            await dispatch(
+              startScrapClientDetailsJob({ client_ids: clientIds })
+            ).unwrap();
+          }
+        }}
+      />
 
       {testModalOpen && (
         <div

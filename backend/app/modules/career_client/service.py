@@ -753,6 +753,7 @@ async def list_career_clients(
     has_email_information: bool | None = None,
     email_found_error: bool | None = None,
     has_import_source: bool | None = None,
+    has_company_details: bool | None = None,
 ) -> CareerClientListResponse:
     """Return a paginated list of active career clients in descending order."""
     items, total = await get_career_clients(
@@ -762,6 +763,7 @@ async def list_career_clients(
         has_email_information=has_email_information,
         email_found_error=email_found_error,
         has_import_source=has_import_source,
+        has_company_details=has_company_details,
     )
 
     response_items = [CareerClientResponse.model_validate(item) for item in items]

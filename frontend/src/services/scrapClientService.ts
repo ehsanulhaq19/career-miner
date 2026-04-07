@@ -31,12 +31,17 @@ export const scrapClientService = {
     return data;
   },
 
-  async startScrapClientJob(params: {
-    client_ids?: number[] | null;
-    only_clients_without_emails?: boolean;
-  }) {
+  async startScrapClientJob(params: { client_ids: number[] }) {
     const { data } = await api.post<ScrapClientJob>(
       "/scrap-clients/start",
+      params
+    );
+    return data;
+  },
+
+  async startScrapClientDetailsJob(params: { client_ids: number[] }) {
+    const { data } = await api.post<ScrapClientJob>(
+      "/scrap-clients/start-details",
       params
     );
     return data;

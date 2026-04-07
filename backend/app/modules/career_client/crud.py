@@ -1,4 +1,4 @@
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.models import (
@@ -64,6 +64,31 @@ def _apply_has_email_filter(query, has_email_information: bool | None):
     )
 
 
+def _apply_has_company_details_filter(query, has_company_details: bool | None):
+    """
+    Filter by company profile detail text and meta_data.company_found_error.
+    True: non-empty detail and company_found_error is not true.
+    False: empty or whitespace-only detail, or company_found_error is true (failed enrichment).
+    None: no filter.
+    """
+    if has_company_details is None:
+        return query
+    trimmed_len = func.length(
+        func.trim(func.coalesce(CareerClient.detail, ""))
+    )
+    company_err_true = text(
+        "(career_clients.meta_data->>'company_found_error') = 'true'"
+    )
+    company_err_not_true = text(
+        "coalesce(career_clients.meta_data->>'company_found_error', 'false') != 'true'"
+    )
+    if has_company_details is True:
+        return query.where(and_(trimmed_len > 0, company_err_not_true))
+    return query.where(
+        or_(trimmed_len == 0, company_err_true),
+    )
+
+
 async def get_career_clients_by_ids_or_all(
     db: AsyncSession,
     client_ids: list[int] | None = None,
@@ -89,6 +114,7 @@ async def get_career_clients(
     has_email_information: bool | None = None,
     email_found_error: bool | None = None,
     has_import_source: bool | None = None,
+    has_company_details: bool | None = None,
 ) -> tuple[list[CareerClient], int]:
     """Retrieve a paginated list of active career clients in descending order by id."""
     base_query = (
@@ -99,6 +125,7 @@ async def get_career_clients(
     base_query = _apply_has_email_filter(base_query, has_email_information)
     base_query = _apply_email_found_error_filter(base_query, email_found_error)
     base_query = _apply_has_import_source_filter(base_query, has_import_source)
+    base_query = _apply_has_company_details_filter(base_query, has_company_details)
     query = base_query.offset(skip).limit(limit)
 
     count_query = select(func.count(CareerClient.id)).where(
@@ -115,6 +142,7 @@ async def get_career_clients(
         )
     count_query = _apply_email_found_error_filter(count_query, email_found_error)
     count_query = _apply_has_import_source_filter(count_query, has_import_source)
+    count_query = _apply_has_company_details_filter(count_query, has_company_details)
 
     result = await db.execute(query)
     items = list(result.scalars().all())

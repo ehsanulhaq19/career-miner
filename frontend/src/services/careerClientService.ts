@@ -28,7 +28,8 @@ export const careerClientService = {
     limit = 20,
     hasEmailInformation?: boolean | null,
     emailFoundError?: boolean | null,
-    hasImportSource?: boolean | null
+    hasImportSource?: boolean | null,
+    hasCompanyDetails?: boolean | null
   ) {
     const params: Record<string, string | number | boolean> = {
       skip,
@@ -48,6 +49,11 @@ export const careerClientService = {
       params.has_import_source = true;
     } else if (hasImportSource === false) {
       params.has_import_source = false;
+    }
+    if (hasCompanyDetails === true) {
+      params.has_company_details = true;
+    } else if (hasCompanyDetails === false) {
+      params.has_company_details = false;
     }
     const { data } = await api.get<PaginatedResponse<CareerClient>>(
       "/career-clients",

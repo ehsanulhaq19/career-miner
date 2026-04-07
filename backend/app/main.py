@@ -20,6 +20,7 @@ from app.modules.llm.api import router as llm_router
 from app.modules.scraper.cron import start_scheduler, stop_scheduler
 from app.modules.workflow.api import router as workflow_router
 from app.modules.websocket.api import router as websocket_router
+from app.modules.analytics.api import router as analytics_router
 
 settings = get_settings()
 
@@ -58,3 +59,4 @@ app.include_router(websocket_router, tags=["WebSocket"])
 app.include_router(llm_router, prefix="/api/llm", tags=["LLM"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(workflow_router, prefix="/api/workflows", tags=["Workflows"])
+app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])

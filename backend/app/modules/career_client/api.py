@@ -118,12 +118,15 @@ async def list_career_clients_endpoint(
     has_email_information: bool | None = Query(None),
     email_found_error: bool | None = Query(None),
     has_import_source: bool | None = Query(None),
+    has_company_details: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CareerClientListResponse:
     """
     List active career clients with pagination in descending order.
     Optional has_import_source filters rows that store an import source in meta_data.
+    Optional has_company_details: false returns rows with empty detail or meta_data.company_found_error true;
+    true returns rows with non-empty detail and no company_found_error flag.
     """
     return await list_career_clients(
         db,
@@ -132,6 +135,7 @@ async def list_career_clients_endpoint(
         has_email_information=has_email_information,
         email_found_error=email_found_error,
         has_import_source=has_import_source,
+        has_company_details=has_company_details,
     )
 
 

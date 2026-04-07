@@ -169,6 +169,8 @@ export interface ScrapClientJob {
     failed?: number;
     client_ids?: number[];
     only_clients_without_emails?: boolean;
+    job_kind?: string;
+    clients_saved?: number;
   };
   created_at: string;
   updated_at: string;
@@ -286,6 +288,36 @@ export interface JobSiteCard {
   total_jobs: number;
   last_scrapped: string | null;
   is_active: boolean;
+}
+
+export interface AnalyticsDailyRow {
+  day: string;
+  scrap_web_jobs_run: number;
+  scrap_web_scraped_records: number;
+  scrap_client_jobs_run: number;
+  scrap_client_scraped_records: number;
+  jobs_created: number;
+  clients_created: number;
+  job_applications_created: number;
+  job_application_emails_success: number;
+  job_application_emails_error: number;
+  workflows_completed: number;
+}
+
+export interface AnalyticsSummary {
+  date_from: string;
+  date_to: string;
+  scrap_web_jobs_run: number;
+  scrap_web_scraped_records: number;
+  scrap_client_jobs_run: number;
+  scrap_client_scraped_records: number;
+  jobs_created: number;
+  clients_created: number;
+  job_applications_created: number;
+  job_application_emails_success: number;
+  job_application_emails_error: number;
+  workflows_completed: number;
+  daily: AnalyticsDailyRow[];
 }
 
 export interface PaginatedResponse<T> {

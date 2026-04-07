@@ -9,6 +9,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.scrap_client.schemas import (
+    ScrapClientDetailsStartRequest,
     ScrapClientJobListResponse,
     ScrapClientLogListResponse,
     ScrapClientJobResponse,
@@ -20,6 +21,7 @@ from app.modules.scrap_client.schemas import (
     TestScrapClientSiteRequest,
 )
 from app.modules.scrap_client.service import (
+    _run_client_details_scraper,
     _run_client_email_scraper,
     _run_client_site_scraper,
     _run_client_url_scraper,
@@ -32,6 +34,7 @@ from app.modules.scrap_client.service import (
     resume_scrap_client_job,
     start_scrap_client_from_site,
     start_scrap_client_from_url,
+    start_scrap_client_details_job,
     start_scrap_client_job,
     start_test_scrap_client_from_site,
     start_test_scrap_client_job,
@@ -61,6 +64,19 @@ async def _run_email_scraper_background(
         )
     except Exception as e:
         logger.exception("Background scraper failed: job_id=%s, error=%s", scrap_client_job_id, e)
+        raise
+
+
+async def _run_client_details_background(scrap_client_job_id: int) -> None:
+    """Execute client company-details enrichment in background."""
+    try:
+        await _run_client_details_scraper(scrap_client_job_id)
+    except Exception as e:
+        logger.exception(
+            "Background client details scraper failed: job_id=%s, error=%s",
+            scrap_client_job_id,
+            e,
+        )
         raise
 
 
@@ -169,9 +185,25 @@ async def start_scrap_client_job_endpoint(
     background_tasks.add_task(
         _run_email_scraper_background,
         result.id,
-        request.client_ids,
-        request.only_clients_without_emails,
+        list(request.client_ids),
+        False,
     )
+    return result
+
+
+@router.post("/start-details", response_model=ScrapClientJobResponse, status_code=201)
+async def start_scrap_client_details_endpoint(
+    request: ScrapClientDetailsStartRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ScrapClientJobResponse:
+    """
+    Create a scrap client job that enriches career client profile fields from the web.
+    Assigns scrap_client_job_id on the selected clients, then runs the details worker in the background.
+    """
+    result = await start_scrap_client_details_job(db, request)
+    background_tasks.add_task(_run_client_details_background, result.id)
     return result
 
 
@@ -234,35 +266,41 @@ async def resume_scrap_client_job_endpoint(
     job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
     if job:
         meta = job.meta_data or {}
-        client_site_id = job.client_site_id
-        if client_site_id is None:
-            client_site_id = meta.get("client_site_id")
-        url = job.source_url or meta.get("url")
-        client_ids = meta.get("client_ids")
-        if client_site_id is not None:
+        if meta.get("job_kind") == "client_details":
             background_tasks.add_task(
-                _run_site_scraper_background,
+                _run_client_details_background,
                 scrap_client_job_id,
-                client_site_id,
-                is_test_mode=meta.get("is_test_mode", False),
-            )
-        elif url and (client_ids is None or len(client_ids or []) == 0) and not meta.get("is_test_mode"):
-            background_tasks.add_task(
-                _run_url_scraper_background,
-                scrap_client_job_id,
-                url,
             )
         else:
-            only_without = meta.get("only_clients_without_emails", False)
-            is_test_mode = meta.get("is_test_mode", False)
-            background_tasks.add_task(
-                _run_email_scraper_background,
-                scrap_client_job_id,
-                client_ids,
-                only_without,
-                url=url,
-                is_test_mode=is_test_mode,
-            )
+            client_site_id = job.client_site_id
+            if client_site_id is None:
+                client_site_id = meta.get("client_site_id")
+            url = job.source_url or meta.get("url")
+            client_ids = meta.get("client_ids")
+            if client_site_id is not None:
+                background_tasks.add_task(
+                    _run_site_scraper_background,
+                    scrap_client_job_id,
+                    client_site_id,
+                    is_test_mode=meta.get("is_test_mode", False),
+                )
+            elif url and (client_ids is None or len(client_ids or []) == 0) and not meta.get("is_test_mode"):
+                background_tasks.add_task(
+                    _run_url_scraper_background,
+                    scrap_client_job_id,
+                    url,
+                )
+            else:
+                only_without = meta.get("only_clients_without_emails", False)
+                is_test_mode = meta.get("is_test_mode", False)
+                background_tasks.add_task(
+                    _run_email_scraper_background,
+                    scrap_client_job_id,
+                    client_ids,
+                    only_without,
+                    url=url,
+                    is_test_mode=is_test_mode,
+                )
     return result
 
 

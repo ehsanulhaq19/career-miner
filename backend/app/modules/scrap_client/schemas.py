@@ -6,8 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class ScrapClientStartRequest(BaseModel):
     """Schema for starting a new scrap client job for email fetching."""
 
-    client_ids: list[int] | None = None
-    only_clients_without_emails: bool = False
+    client_ids: list[int] = Field(..., min_length=1)
+
+
+class ScrapClientDetailsStartRequest(BaseModel):
+    """Schema for starting a scrap client job that enriches company profile fields."""
+
+    client_ids: list[int] = Field(..., min_length=1)
 
 
 class ScrapClientSiteStartRequest(BaseModel):
