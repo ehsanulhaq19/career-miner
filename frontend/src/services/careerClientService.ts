@@ -122,11 +122,15 @@ export const careerClientService = {
 
   async getCareerClientEmailRows(
     page: number,
-    emailCount?: "asc" | "desc" | null
+    emailCount?: "asc" | "desc" | null,
+    createdAt?: "asc" | "desc" | null
   ) {
     const params: Record<string, string | number> = { page };
     if (emailCount === "asc" || emailCount === "desc") {
       params.email_count = emailCount;
+    }
+    if (createdAt === "asc" || createdAt === "desc") {
+      params.created_at = createdAt;
     }
     const { data } = await api.get<PaginatedResponse<CareerClientEmailRow>>(
       "/career-clients/email-rows",
@@ -137,11 +141,16 @@ export const careerClientService = {
 
   async bulkSendCareerClientEmails(
     resumeId: number,
-    recipients: { client_id: number; client_email: string }[]
+    recipients: { client_id: number; client_email: string }[],
+    applicationDetail?: string
   ) {
     const { data } = await api.post<{ id: number; status: string }>(
       "/career-clients/bulk-email/send",
-      { resume_id: resumeId, recipients }
+      {
+        resume_id: resumeId,
+        recipients,
+        application_detail: applicationDetail?.trim() || null,
+      }
     );
     return data;
   },

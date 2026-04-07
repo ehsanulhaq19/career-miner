@@ -27,6 +27,11 @@ from app.modules.scrap_job.crud import (
     update_scrap_job_status,
 )
 from app.modules.scrap_job.models import ScrapJob, ScrapJobStatus
+
+# STOPPED (user) or TERMINATED (e.g. timeout): runner exits without marking COMPLETED.
+_SCRAP_JOB_HALTED_STATUSES: frozenset[str] = frozenset(
+    {ScrapJobStatus.STOPPED.value, ScrapJobStatus.TERMINATED.value}
+)
 from app.modules.scrap_job.schemas import ScrapJobResponse
 from app.modules.scraper.prompts import (
     JOB_PARSER_SYSTEM_PROMPT,
@@ -150,7 +155,7 @@ class ScraperService:
         Deduplicates jobs by title and link, keeping the latest parsed data.
         """
         refreshed = await get_scrap_job_by_id(db, scrap_job.id)
-        if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
+        if refreshed and refreshed.status in _SCRAP_JOB_HALTED_STATUSES:
             return
         updated = await update_scrap_job_status(
             db, scrap_job.id, ScrapJobStatus.IN_PROGRESS
@@ -196,8 +201,10 @@ class ScraperService:
                 await self._core.warm_up_session(client, job_site.url)
                 while to_visit and pages_scraped < effective_max_pages:
                     refreshed = await get_scrap_job_by_id(db, scrap_job.id)
-                    if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
-                        logger.info("Scrap job %d stopped by user", scrap_job.id)
+                    if refreshed and refreshed.status in _SCRAP_JOB_HALTED_STATUSES:
+                        logger.info(
+                            "Scrap job %d halted (status=%s)", scrap_job.id, refreshed.status
+                        )
                         break
 
                     url, current_depth = to_visit.popleft()
@@ -359,8 +366,10 @@ class ScraperService:
                         await asyncio.sleep(delay)
 
                 refreshed = await get_scrap_job_by_id(db, scrap_job.id)
-                if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
-                    logger.info("Scrap job %d stopped by user", scrap_job.id)
+                if refreshed and refreshed.status in _SCRAP_JOB_HALTED_STATUSES:
+                    logger.info(
+                        "Scrap job %d halted (status=%s)", scrap_job.id, refreshed.status
+                    )
                     return
 
                 all_jobs = list(all_jobs_by_key.values())
@@ -384,8 +393,12 @@ class ScraperService:
                         all_jobs, db, scrap_job.id
                     ):
                         refreshed = await get_scrap_job_by_id(db, scrap_job.id)
-                        if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
-                            logger.info("Scrap job %d stopped by user", scrap_job.id)
+                        if refreshed and refreshed.status in _SCRAP_JOB_HALTED_STATUSES:
+                            logger.info(
+                                "Scrap job %d halted (status=%s)",
+                                scrap_job.id,
+                                refreshed.status,
+                            )
                             return
 
                         links = job_data.get("links") or []
@@ -493,7 +506,7 @@ class ScraperService:
                 saved_count,
             )
             refreshed = await get_scrap_job_by_id(db, scrap_job.id)
-            if refreshed and refreshed.status != ScrapJobStatus.STOPPED.value:
+            if refreshed and refreshed.status not in _SCRAP_JOB_HALTED_STATUSES:
                 updated = await update_scrap_job_status(
                     db, scrap_job.id, ScrapJobStatus.COMPLETED
                 )
@@ -528,7 +541,7 @@ class ScraperService:
             except Exception:
                 pass
             refreshed = await get_scrap_job_by_id(db, scrap_job.id)
-            if refreshed and refreshed.status != ScrapJobStatus.STOPPED.value:
+            if refreshed and refreshed.status not in _SCRAP_JOB_HALTED_STATUSES:
                 updated = await update_scrap_job_status(
                     db, scrap_job.id, ScrapJobStatus.ERROR
                 )
@@ -573,7 +586,7 @@ class ScraperService:
         )
         for i in range(0, len(jobs), chunk_size):
             refreshed = await get_scrap_job_by_id(db, scrap_job_id)
-            if refreshed and refreshed.status == ScrapJobStatus.STOPPED.value:
+            if refreshed and refreshed.status in _SCRAP_JOB_HALTED_STATUSES:
                 return
 
             chunk = jobs[i : i + chunk_size]

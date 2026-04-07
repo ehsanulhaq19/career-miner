@@ -210,6 +210,7 @@ async def send_career_client_outreach_email(
     client_id: int,
     client_email: str,
     resume_id: int,
+    application_detail: str | None,
     user_id: int,
 ) -> None:
     """
@@ -241,13 +242,16 @@ async def send_career_client_outreach_email(
     company_context_str = json.dumps(company_context, indent=2, default=str)
     resume_content_raw = resume.content or ""
     resume_extra_detail = getattr(resume, "extra_detail", None) or ""
+    application_extra_detail = (application_detail or "").strip()
 
     prompt = CAREER_CLIENT_OUTREACH_USER_PROMPT_TEMPLATE.format(
         task="create outreach resume and cover letter for this company",
         company_context=company_context_str,
         target_email=client_email.strip(),
         resume_content=resume_content_raw,
-        resume_extra_detail=resume_extra_detail,
+        resume_extra_detail=(
+            f"{resume_extra_detail}\n\n{application_extra_detail}".strip()
+        ),
     )
 
     llm_client = LLMFactory.get_client(
@@ -319,6 +323,7 @@ async def start_bulk_career_client_email_send(
         "resume_id": request.resume_id,
         "recipients": recipient_dicts,
         "total": len(recipient_dicts),
+        "application_detail": (request.application_detail or "").strip(),
     }
     bulk = await create_bulk_career_client_email_send(
         db,
@@ -333,6 +338,7 @@ async def start_bulk_career_client_email_send(
         "status": bulk.status,
         "resume_id": request.resume_id,
         "recipients": recipient_dicts,
+        "application_detail": (request.application_detail or "").strip(),
     }
 
 
@@ -340,6 +346,7 @@ async def run_bulk_career_client_email_background(
     bulk_id: int,
     resume_id: int,
     recipients: list[dict],
+    application_detail: str | None,
     user_id: int,
 ) -> None:
     """
@@ -402,6 +409,7 @@ async def run_bulk_career_client_email_background(
                             int(cid),
                             str(cemail),
                             resume_id,
+                            application_detail,
                             user_id,
                         )
                         await work_db.commit()
@@ -512,6 +520,7 @@ async def list_career_client_email_rows(
     db: AsyncSession,
     page: int,
     email_count_sort: str | None,
+    created_at_sort: str | None,
 ) -> CareerClientEmailRowsListResponse:
     """
     Return paginated career client email rows with historical send counts.
@@ -522,7 +531,11 @@ async def list_career_client_email_rows(
     skip = (page - 1) * limit
     total = await count_career_client_email_rows(db)
     rows = await list_career_client_email_rows_paginated(
-        db, skip=skip, limit=limit, email_count_sort=email_count_sort
+        db,
+        skip=skip,
+        limit=limit,
+        email_count_sort=email_count_sort,
+        created_at_sort=created_at_sort,
     )
     items = [CareerClientEmailRowResponse.model_validate(r) for r in rows]
     return CareerClientEmailRowsListResponse(

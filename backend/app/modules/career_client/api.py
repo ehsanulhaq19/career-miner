@@ -58,6 +58,7 @@ async def _validate_client_emails_background_task(
 async def list_career_client_email_rows_endpoint(
     page: int = Query(1, ge=1),
     email_count: Literal["asc", "desc"] | None = Query(None),
+    created_at: Literal["asc", "desc"] | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CareerClientEmailRowsListResponse:
@@ -67,7 +68,10 @@ async def list_career_client_email_rows_endpoint(
     """
     _ = current_user
     return await list_career_client_email_rows(
-        db, page=page, email_count_sort=email_count
+        db,
+        page=page,
+        email_count_sort=email_count,
+        created_at_sort=created_at,
     )
 
 
@@ -89,6 +93,7 @@ async def bulk_send_career_client_emails_endpoint(
         result["id"],
         result["resume_id"],
         result["recipients"],
+        result["application_detail"],
         current_user.id,
     )
     return {"id": result["id"], "status": result["status"]}

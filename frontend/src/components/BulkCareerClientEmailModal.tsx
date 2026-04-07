@@ -33,8 +33,12 @@ export default function BulkCareerClientEmailModal({
   const { logsByBulkId } = useAppSelector(
     (state) => state.bulkCareerClientEmail
   );
-  const [emailCountSort, setEmailCountSort] = useState<
-    "" | "asc" | "desc"
+  const [sortBy, setSortBy] = useState<
+    ""
+    | "email_count_asc"
+    | "email_count_desc"
+    | "created_at_asc"
+    | "created_at_desc"
   >("");
   const [items, setItems] = useState<CareerClientEmailRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -54,6 +58,7 @@ export default function BulkCareerClientEmailModal({
   const [logsSearchQuery, setLogsSearchQuery] = useState("");
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [resumeId, setResumeId] = useState<number | null>(null);
+  const [applicationDetail, setApplicationDetail] = useState("");
   const [outreachLogs, setOutreachLogs] = useState<EmailLog[] | null>(null);
   const [outreachLogsTitle, setOutreachLogsTitle] = useState("");
   const [outreachLogsLoading, setOutreachLogsLoading] = useState(false);
@@ -81,8 +86,9 @@ export default function BulkCareerClientEmailModal({
       setNextPage(2);
       loadMoreInFlightRef.current = false;
       setSelectedKeys(new Set());
-      setEmailCountSort("");
+      setSortBy("");
       setResumeId(null);
+      setApplicationDetail("");
       setOutreachLogs(null);
       setOutreachLogsTitle("");
       return;
@@ -105,15 +111,21 @@ export default function BulkCareerClientEmailModal({
     nextPageRef.current = nextPage;
   }, [nextPage]);
 
-  const getSortParam = useCallback(():
-    | "asc"
-    | "desc"
-    | null => {
-    if (emailCountSort === "asc" || emailCountSort === "desc") {
-      return emailCountSort;
+  const getSortParam = useCallback(() => {
+    if (sortBy === "email_count_asc") {
+      return { emailCount: "asc" as const, createdAt: null };
     }
-    return null;
-  }, [emailCountSort]);
+    if (sortBy === "email_count_desc") {
+      return { emailCount: "desc" as const, createdAt: null };
+    }
+    if (sortBy === "created_at_asc") {
+      return { emailCount: null, createdAt: "asc" as const };
+    }
+    if (sortBy === "created_at_desc") {
+      return { emailCount: null, createdAt: "desc" as const };
+    }
+    return { emailCount: null, createdAt: null };
+  }, [sortBy]);
 
   const handleFetch = async () => {
     setFetching(true);
@@ -131,7 +143,8 @@ export default function BulkCareerClientEmailModal({
     try {
       const data = await careerClientService.getCareerClientEmailRows(
         1,
-        sortParam
+        sortParam.emailCount,
+        sortParam.createdAt
       );
       const chunk = data.items || [];
       setItems(chunk);
@@ -156,7 +169,8 @@ export default function BulkCareerClientEmailModal({
     try {
       const data = await careerClientService.getCareerClientEmailRows(
         page,
-        sortParam
+        sortParam.emailCount,
+        sortParam.createdAt
       );
       const chunk = data.items || [];
       if (!chunk.length) {
@@ -240,7 +254,8 @@ export default function BulkCareerClientEmailModal({
         }));
       const result = await careerClientService.bulkSendCareerClientEmails(
         resumeId,
-        recipients
+        recipients,
+        applicationDetail
       );
       setActiveBulkId(result.id);
       setLogsModalOpen(true);
@@ -357,20 +372,29 @@ export default function BulkCareerClientEmailModal({
             </div>
             <div>
               <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                Sort by email count
+                Sort
               </label>
               <select
-                value={emailCountSort}
+                value={sortBy}
                 onChange={(e) =>
-                  setEmailCountSort(
-                    (e.target.value as "" | "asc" | "desc") || ""
+                  setSortBy(
+                    (
+                      e.target.value as
+                        | ""
+                        | "email_count_asc"
+                        | "email_count_desc"
+                        | "created_at_asc"
+                        | "created_at_desc"
+                    ) || ""
                   )
                 }
                 className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
               >
                 <option value="">Default</option>
-                <option value="asc">Count ascending</option>
-                <option value="desc">Count descending</option>
+                <option value="email_count_asc">Email count ascending</option>
+                <option value="email_count_desc">Email count descending</option>
+                <option value="created_at_asc">Created at ascending</option>
+                <option value="created_at_desc">Created at descending</option>
               </select>
             </div>
             <button
@@ -380,6 +404,19 @@ export default function BulkCareerClientEmailModal({
             >
               {fetching ? "Loading…" : "Load clients"}
             </button>
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+              Application detail
+            </label>
+            <textarea
+              value={applicationDetail}
+              onChange={(e) => setApplicationDetail(e.target.value)}
+              rows={4}
+              placeholder="Add job or application specific details for personalized outreach"
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+            />
           </div>
 
           {fetching && (
@@ -429,6 +466,9 @@ export default function BulkCareerClientEmailModal({
                   <th className="text-left px-4 py-3 font-medium">Email</th>
                   <th className="text-left px-4 py-3 font-medium">Location</th>
                   <th className="text-left px-4 py-3 font-medium">
+                    Created at
+                  </th>
+                  <th className="text-left px-4 py-3 font-medium">
                     Email sends
                   </th>
                   <th className="text-left px-4 py-3 font-medium">Logs</th>
@@ -438,7 +478,7 @@ export default function BulkCareerClientEmailModal({
                 {items.length === 0 && !fetching ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-gray-500"
                     >
                       Choose sort options and click Load clients
@@ -468,6 +508,9 @@ export default function BulkCareerClientEmailModal({
                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
                           {row.location || "—"}
                         </td>
+                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                          {new Date(row.created_at).toLocaleDateString()}
+                        </td>
                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
                           {row.email_count}
                         </td>
@@ -485,7 +528,7 @@ export default function BulkCareerClientEmailModal({
                     {loadingMore && (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={7}
                           className="px-4 py-3 text-center text-sm text-gray-500 dark:text-gray-400"
                         >
                           Loading more…

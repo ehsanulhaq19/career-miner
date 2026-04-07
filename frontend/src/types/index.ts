@@ -246,6 +246,7 @@ export interface CareerClientEmailRow {
   client_name: string | null;
   official_website: string | null;
   location: string | null;
+  created_at: string;
   client_email: string;
   email_count: number;
 }

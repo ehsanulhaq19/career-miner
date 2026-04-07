@@ -558,7 +558,10 @@ async def update_bulk_career_client_email_send_status(
     return record
 
 
-def _email_rows_order_clause(email_count_sort: str | None) -> str:
+def _email_rows_order_clause(
+    email_count_sort: str | None,
+    created_at_sort: str | None,
+) -> str:
     """
     Build an ORDER BY clause for email row listing (whitelist only).
     """
@@ -566,6 +569,10 @@ def _email_rows_order_clause(email_count_sort: str | None) -> str:
         return "email_count ASC, client_id DESC, client_email ASC"
     if email_count_sort == "desc":
         return "email_count DESC, client_id DESC, client_email ASC"
+    if created_at_sort == "asc":
+        return "created_at ASC, client_id DESC, client_email ASC"
+    if created_at_sort == "desc":
+        return "created_at DESC, client_id DESC, client_email ASC"
     return "client_id DESC, client_email ASC"
 
 
@@ -598,11 +605,12 @@ async def list_career_client_email_rows_paginated(
     skip: int,
     limit: int,
     email_count_sort: str | None,
+    created_at_sort: str | None,
 ) -> list[dict]:
     """
     List flattened client emails with send counts from email_logs, paginated.
     """
-    order_sql = _email_rows_order_clause(email_count_sort)
+    order_sql = _email_rows_order_clause(email_count_sort, created_at_sort)
     stmt = text(
         f"""
         WITH expanded AS (
@@ -611,6 +619,7 @@ async def list_career_client_email_rows_paginated(
                 c.name AS client_name,
                 c.official_website,
                 c.location,
+                c.created_at,
                 e.elem AS client_email
             FROM career_clients c
             CROSS JOIN LATERAL jsonb_array_elements_text(
@@ -629,13 +638,21 @@ async def list_career_client_email_rows_paginated(
                 ex.client_name,
                 ex.official_website,
                 ex.location,
+                ex.created_at,
                 ex.client_email,
                 COALESCE(ct.email_count, 0)::int AS email_count
             FROM expanded ex
             LEFT JOIN counts ct
                 ON ct.norm_email = LOWER(TRIM(ex.client_email))
         )
-        SELECT client_id, client_name, official_website, location, client_email, email_count
+        SELECT
+            client_id,
+            client_name,
+            official_website,
+            location,
+            created_at,
+            client_email,
+            email_count
         FROM with_counts
         ORDER BY {order_sql}
         OFFSET :skip LIMIT :limit

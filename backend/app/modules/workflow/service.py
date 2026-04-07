@@ -90,6 +90,53 @@ def _resolve_resource(delta: dict) -> tuple[str | None, int | None]:
     return None, None
 
 
+async def _workflow_job_row_status_for_linked_task(
+    linked_model: str, delta: dict
+) -> str:
+    """
+    Step row status after dispatch: COMPLETED unless the linked job record is terminated.
+    """
+    from app.modules.job_application.crud import (
+        get_bulk_job_application_by_id,
+        get_bulk_job_application_email_send_by_id,
+    )
+    from app.modules.job_application.models import (
+        BulkJobApplicationEmailSendStatus,
+        BulkJobApplicationStatus,
+    )
+    from app.modules.scrap_client.crud import get_scrap_client_job_by_id
+    from app.modules.scrap_client.models import ScrapClientJobStatus
+    from app.modules.scrap_job.crud import get_scrap_job_by_id
+    from app.modules.scrap_job.models import ScrapJobStatus
+
+    async with async_session() as db:
+        if linked_model == LinkedTaskModelName.SCRAP_JOB.value:
+            sid = delta.get("scrap_job_id")
+            if sid is not None:
+                row = await get_scrap_job_by_id(db, int(sid))
+                if row and row.status == ScrapJobStatus.TERMINATED.value:
+                    return WorkflowJobStatus.TERMINATED.value
+        elif linked_model == LinkedTaskModelName.SCRAP_CLIENT_JOB.value:
+            sid = delta.get("scrap_client_job_id")
+            if sid is not None:
+                row = await get_scrap_client_job_by_id(db, int(sid))
+                if row and row.status == ScrapClientJobStatus.TERMINATED.value:
+                    return WorkflowJobStatus.TERMINATED.value
+        elif linked_model == LinkedTaskModelName.BULK_JOB_APPLICATION.value:
+            bid = delta.get("bulk_job_application_id")
+            if bid is not None:
+                row = await get_bulk_job_application_by_id(db, int(bid))
+                if row and row.status == BulkJobApplicationStatus.TERMINATED.value:
+                    return WorkflowJobStatus.TERMINATED.value
+        elif linked_model == LinkedTaskModelName.BULK_JOB_APPLICATION_EMAIL_SEND.value:
+            eid = delta.get("bulk_job_application_email_send_id")
+            if eid is not None:
+                row = await get_bulk_job_application_email_send_by_id(db, int(eid))
+                if row and row.status == BulkJobApplicationEmailSendStatus.TERMINATED.value:
+                    return WorkflowJobStatus.TERMINATED.value
+    return WorkflowJobStatus.COMPLETED.value
+
+
 async def _dispatch_scrap_job(
     data: dict,
     user_id: int,
@@ -411,6 +458,14 @@ async def execute_workflow_run(workflow_id: int) -> None:
             )
             context.update(delta)
             rtype, rid = _resolve_resource(delta)
+            wj_row_status = await _workflow_job_row_status_for_linked_task(
+                task.linked_task_model, delta
+            )
+            log_action = (
+                "task_terminated"
+                if wj_row_status == WorkflowJobStatus.TERMINATED.value
+                else "task_completed"
+            )
             async with async_session() as db:
                 ex_row = await workflow_crud.get_workflow_execution_by_id(db, ex_id)
                 if ex_row:
@@ -424,7 +479,7 @@ async def execute_workflow_run(workflow_id: int) -> None:
                         db,
                         wj_id,
                         {
-                            "status": WorkflowJobStatus.COMPLETED.value,
+                            "status": wj_row_status,
                             "completed_at": datetime.now(timezone.utc).replace(
                                 tzinfo=None
                             ),
@@ -435,7 +490,7 @@ async def execute_workflow_run(workflow_id: int) -> None:
                     await _wf_append_log(
                         db,
                         wj_id,
-                        "task_completed",
+                        log_action,
                         f"model={task.linked_task_model}",
                         {"delta_keys": list(delta.keys())},
                         user_id,
@@ -447,6 +502,7 @@ async def execute_workflow_run(workflow_id: int) -> None:
                     "event": "workflow_job_completed",
                     "workflow_execution_id": ex_id,
                     "workflow_job_id": wj_id,
+                    "status": wj_row_status,
                 },
             )
         except Exception as e:

@@ -31,6 +31,10 @@ from app.modules.scrap_client.crud import (
     update_scrap_client_job_status,
 )
 from app.modules.scrap_client.models import ScrapClientJobStatus
+
+_SCRAP_CLIENT_HALTED_STATUSES: frozenset[str] = frozenset(
+    {ScrapClientJobStatus.STOPPED.value, ScrapClientJobStatus.TERMINATED.value}
+)
 from app.modules.scrap_client.schemas import (
     ScrapClientDetailsStartRequest,
     ScrapClientJobListResponse,
@@ -345,7 +349,7 @@ async def _run_client_site_scraper(
         """Check if the job has been stopped by the user."""
         async with async_session() as s:
             j = await get_scrap_client_job_by_id(s, scrap_client_job_id)
-            return j is not None and j.status == ScrapClientJobStatus.STOPPED.value
+            return j is not None and j.status in _SCRAP_CLIENT_HALTED_STATUSES
 
     from app.modules.client_site.crud import get_client_site_by_id
     from app.modules.scrap_client.services.client_data_scraper import scrape_clients_from_url
@@ -471,7 +475,7 @@ async def _run_client_email_scraper(
         """Check if the job has been stopped by the user."""
         async with async_session() as s:
             j = await get_scrap_client_job_by_id(s, scrap_client_job_id)
-            return j is not None and j.status == ScrapClientJobStatus.STOPPED.value
+            return j is not None and j.status in _SCRAP_CLIENT_HALTED_STATUSES
 
     async with async_session() as db:
         try:
@@ -688,7 +692,7 @@ async def _run_client_email_scraper(
 
             async with async_session() as fdb:
                 j = await get_scrap_client_job_by_id(fdb, scrap_client_job_id)
-                if j and j.status != ScrapClientJobStatus.STOPPED.value:
+                if j and j.status not in _SCRAP_CLIENT_HALTED_STATUSES:
                     await update_scrap_client_job_status(
                         fdb, scrap_client_job_id, ScrapClientJobStatus.COMPLETED
                     )
@@ -817,7 +821,7 @@ async def _run_client_details_scraper(scrap_client_job_id: int) -> None:
         """Return True when the job has been stopped by the user."""
         async with async_session() as s:
             j = await get_scrap_client_job_by_id(s, scrap_client_job_id)
-            return j is not None and j.status == ScrapClientJobStatus.STOPPED.value
+            return j is not None and j.status in _SCRAP_CLIENT_HALTED_STATUSES
 
     async with async_session() as db:
         try:
@@ -1020,7 +1024,7 @@ async def _run_client_details_scraper(scrap_client_job_id: int) -> None:
 
             async with async_session() as fdb:
                 j = await get_scrap_client_job_by_id(fdb, scrap_client_job_id)
-                if j and j.status != ScrapClientJobStatus.STOPPED.value:
+                if j and j.status not in _SCRAP_CLIENT_HALTED_STATUSES:
                     await update_scrap_client_job_status(
                         fdb, scrap_client_job_id, ScrapClientJobStatus.COMPLETED
                     )
@@ -1079,7 +1083,7 @@ async def _run_client_url_scraper(
     async def is_stopped() -> bool:
         async with async_session() as s:
             j = await get_scrap_client_job_by_id(s, scrap_client_job_id)
-            return j is not None and j.status == ScrapClientJobStatus.STOPPED.value
+            return j is not None and j.status in _SCRAP_CLIENT_HALTED_STATUSES
 
     from app.modules.scrap_client.services.client_data_scraper import scrape_clients_from_url
     from app.modules.scrap_client.services.url_utils import normalize_url

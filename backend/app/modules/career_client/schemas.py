@@ -147,6 +147,7 @@ class CareerClientBulkEmailSendRequest(BaseModel):
 
     resume_id: int
     recipients: list[CareerClientBulkEmailRecipient]
+    application_detail: str | None = None
 
     @field_validator("recipients")
     @classmethod
@@ -163,6 +164,7 @@ class CareerClientEmailRowResponse(BaseModel):
     client_name: str | None
     official_website: str | None
     location: str | None
+    created_at: datetime
     client_email: str
     email_count: int
 

@@ -45,6 +45,13 @@ from app.modules.job_application.models import (
     BulkJobApplicationEmailSendStatus,
     BulkJobApplicationStatus,
 )
+
+_BULK_JOB_APP_HALTED_STATUSES: frozenset[str] = frozenset(
+    {
+        BulkJobApplicationStatus.STOPPED.value,
+        BulkJobApplicationStatus.TERMINATED.value,
+    }
+)
 from app.modules.job_application.schemas import (
     BulkJobApplicationEmailSendLogListResponse,
     BulkJobApplicationEmailSendLogResponse,
@@ -502,7 +509,7 @@ async def run_bulk_job_application_background(
             )
             if bulk_job_application is None:
                 return
-            if bulk_job_application.status == BulkJobApplicationStatus.STOPPED.value:
+            if bulk_job_application.status in _BULK_JOB_APP_HALTED_STATUSES:
                 return
 
             await update_bulk_job_application_status(
@@ -529,7 +536,10 @@ async def run_bulk_job_application_background(
                 bulk_job_application = await get_bulk_job_application_by_id(
                     db, bulk_job_application_id
                 )
-                if bulk_job_application and bulk_job_application.status == BulkJobApplicationStatus.STOPPED.value:
+                if (
+                    bulk_job_application
+                    and bulk_job_application.status in _BULK_JOB_APP_HALTED_STATUSES
+                ):
                     break
 
                 progress = int((idx / total) * 100) if total > 0 else 0
@@ -576,6 +586,16 @@ async def run_bulk_job_application_background(
                         details=f"Failed to create job application for job {career_job_id}",
                         meta_data={"career_job_id": career_job_id, "job_application_index": idx + 1, "total": total},
                     )
+
+            bulk_job_application = await get_bulk_job_application_by_id(
+                db, bulk_job_application_id
+            )
+            if (
+                bulk_job_application
+                and bulk_job_application.status in _BULK_JOB_APP_HALTED_STATUSES
+            ):
+                await db.commit()
+                return
 
             final_status = BulkJobApplicationStatus.COMPLETED
             if failed_count > 0 and created_count == 0:
