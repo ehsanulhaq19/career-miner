@@ -111,6 +111,7 @@ async def start_scrap_job_endpoint(
     result = await start_scrap_job(
         db,
         request.job_site_id,
+        current_user.id,
         load_more_on_scroll=request.load_more_on_scroll,
         max_scroll=request.max_scroll,
         depth_levels=request.depth_levels,
@@ -134,7 +135,7 @@ async def test_scrap_job_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapJobResponse:
     """Create and start a test scrap job with custom parameters."""
-    result = await start_test_scrap_job(db, request)
+    result = await start_test_scrap_job(db, request, current_user.id)
     background_tasks.add_task(
         _run_test_scraper_background,
         request.job_site_id,
@@ -156,7 +157,7 @@ async def stop_scrap_job_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapJobResponse:
     """Stop a scrap job that is currently in progress."""
-    return await stop_scrap_job(db, scrap_job_id)
+    return await stop_scrap_job(db, scrap_job_id, current_user.id)
 
 
 @router.post("/{scrap_job_id}/resume", response_model=ScrapJobResponse)
@@ -167,7 +168,7 @@ async def resume_scrap_job_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapJobResponse:
     """Resume a stopped scrap job."""
-    result = await resume_scrap_job(db, scrap_job_id)
+    result = await resume_scrap_job(db, scrap_job_id, current_user.id)
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job:
         job_site = await get_job_site_by_id(db, scrap_job.job_site_id)
@@ -196,9 +197,14 @@ async def list_scrap_jobs_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ScrapJobListResponse:
-    """List all scrap jobs with optional filtering and pagination."""
+    """List scrap jobs for the current user with optional filtering and pagination."""
     return await list_scrap_jobs(
-        db, skip=skip, limit=limit, job_site_id=job_site_id, status=status,
+        db,
+        skip=skip,
+        limit=limit,
+        job_site_id=job_site_id,
+        status=status,
+        user_id=current_user.id,
     )
 
 
@@ -209,7 +215,7 @@ async def get_scrap_job_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapJobResponse:
     """Retrieve a single scrap job by ID."""
-    return await get_scrap_job(db, scrap_job_id)
+    return await get_scrap_job(db, scrap_job_id, user_id=current_user.id)
 
 
 @router.get("/{scrap_job_id}/logs", response_model=ScrapJobLogListResponse)
@@ -219,7 +225,7 @@ async def get_scrap_job_logs_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapJobLogListResponse:
     """Retrieve scrap job logs for a given scrap job."""
-    return await get_scrap_job_logs(db, scrap_job_id)
+    return await get_scrap_job_logs(db, scrap_job_id, user_id=current_user.id)
 
 
 @router.get("/{scrap_job_id}/scrappers", response_model=ScrapperListResponse)
@@ -229,7 +235,9 @@ async def list_scrap_job_scrappers_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapperListResponse:
     """List stored HTML pages (scrappers) associated with a scrap job."""
-    return await list_scrappers_for_scrap_job_service(db, scrap_job_id)
+    return await list_scrappers_for_scrap_job_service(
+        db, scrap_job_id, user_id=current_user.id
+    )
 
 
 @router.get(
@@ -243,4 +251,6 @@ async def get_scrap_job_scrapper_html_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapperHtmlPreviewResponse:
     """Return raw HTML content for preview for one scrapper linked to the job."""
-    return await get_scrapper_html_for_scrap_job(db, scrap_job_id, scrapper_id)
+    return await get_scrapper_html_for_scrap_job(
+        db, scrap_job_id, scrapper_id, user_id=current_user.id
+    )

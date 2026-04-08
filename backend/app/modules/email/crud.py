@@ -27,6 +27,7 @@ async def get_job_email_logs(
     created_date_from: date | None = None,
     created_date_to: date | None = None,
     search: str | None = None,
+    user_id: int | None = None,
 ) -> tuple[list[tuple], int]:
     """
     Retrieve paginated job email logs (email logs linked to job applications).
@@ -47,6 +48,11 @@ async def get_job_email_logs(
         .join(CareerJob, CareerJob.id == JobApplication.career_job_id)
         .outerjoin(CareerClient, CareerClient.id == CareerJob.career_client_id)
     )
+
+    if user_id is not None:
+        owner = JobApplication.created_by == user_id
+        base = base.where(owner)
+        count_base = count_base.where(owner)
 
     if career_client_id is not None:
         base = base.where(CareerJob.career_client_id == career_client_id)
@@ -115,5 +121,23 @@ async def get_job_email_logs_count(db: AsyncSession) -> int:
         select(func.count(EmailLog.id))
         .select_from(EmailLog)
         .join(JobApplicationEmailLog, JobApplicationEmailLog.email_log_id == EmailLog.id)
+    )
+    return result.scalar() or 0
+
+
+async def get_job_email_logs_count_for_user(db: AsyncSession, user_id: int) -> int:
+    """Return count of email logs linked to the given user's job applications."""
+    result = await db.execute(
+        select(func.count(EmailLog.id))
+        .select_from(EmailLog)
+        .join(
+            JobApplicationEmailLog,
+            JobApplicationEmailLog.email_log_id == EmailLog.id,
+        )
+        .join(
+            JobApplication,
+            JobApplication.id == JobApplicationEmailLog.job_application_id,
+        )
+        .where(JobApplication.user_id == user_id)
     )
     return result.scalar() or 0

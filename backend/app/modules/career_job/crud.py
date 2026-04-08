@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.models import CareerClient
@@ -34,17 +34,22 @@ async def create_career_job_user(
     return career_job_user
 
 
-async def get_all_career_job_ids(db: AsyncSession) -> list[int]:
-    """Return list of all career job ids."""
-    result = await db.execute(select(CareerJob.id))
+async def get_all_career_job_ids(
+    db: AsyncSession, created_by: int | None = None
+) -> list[int]:
+    """Return list of career job ids, optionally scoped to a single owner."""
+    q = select(CareerJob.id)
+    if created_by is not None:
+        q = q.where(CareerJob.created_by == created_by)
+    result = await db.execute(q)
     return list(result.scalars().all())
 
 
 async def mark_all_jobs_seen_for_user(
-    db: AsyncSession, user_id: int
+    db: AsyncSession, user_id: int, created_by: int | None = None
 ) -> int:
     """Mark all career jobs as seen for the user. Returns count of newly created records."""
-    all_ids = await get_all_career_job_ids(db)
+    all_ids = await get_all_career_job_ids(db, created_by=created_by)
     if not all_ids:
         return 0
     seen_ids = await get_seen_career_job_ids_from_list(db, user_id, all_ids)
@@ -65,6 +70,7 @@ async def get_career_job_ids_by_filters(
     has_client_emails: bool = False,
     created_date_from: date | None = None,
     created_date_to: date | None = None,
+    created_by: int | None = None,
 ) -> list[int]:
     """
     Return career job IDs matching the given filters.
@@ -84,6 +90,7 @@ async def get_career_job_ids_by_filters(
         has_client_emails=has_client_emails,
         created_date_from=created_date_from,
         created_date_to=created_date_to,
+        created_by=created_by,
     )
     query = query.order_by(CareerJob.created_at.desc())
     result = await db.execute(query)
@@ -134,8 +141,13 @@ def _apply_career_job_filters(
     has_client_emails: bool = False,
     created_date_from: date | None = None,
     created_date_to: date | None = None,
+    created_by: int | None = None,
 ):
     """Apply common filters to career job query and count query."""
+    if created_by is not None:
+        query = query.where(CareerJob.created_by == created_by)
+        count_query = count_query.where(CareerJob.created_by == created_by)
+
     if job_site_id is not None:
         query = query.where(CareerJob.job_site_id == job_site_id)
         count_query = count_query.where(CareerJob.job_site_id == job_site_id)
@@ -191,6 +203,7 @@ async def get_career_jobs(
     has_client_emails: bool = False,
     created_date_from: date | None = None,
     created_date_to: date | None = None,
+    created_by: int | None = None,
 ) -> tuple[list[CareerJob], int]:
     """
     Retrieve a paginated list of career jobs with optional filters.
@@ -210,6 +223,7 @@ async def get_career_jobs(
         has_client_emails=has_client_emails,
         created_date_from=created_date_from,
         created_date_to=created_date_to,
+        created_by=created_by,
     )
     query = query.order_by(CareerJob.created_at.desc()).offset(skip).limit(limit)
 
@@ -248,26 +262,36 @@ async def create_career_job(db: AsyncSession, data: dict) -> CareerJob:
 async def get_career_job_ids_by_scrap_job_id(
     db: AsyncSession,
     scrap_job_id: int,
+    created_by: int | None = None,
 ) -> list[int]:
     """Return career job ids created under the given scrap job."""
-    result = await db.execute(
-        select(CareerJob.id).where(CareerJob.scrap_job_id == scrap_job_id)
-    )
+    q = select(CareerJob.id).where(CareerJob.scrap_job_id == scrap_job_id)
+    if created_by is not None:
+        q = q.where(CareerJob.created_by == created_by)
+    result = await db.execute(q)
     return [row[0] for row in result.all()]
 
 
 async def get_career_client_ids_for_career_jobs(
     db: AsyncSession,
     career_job_ids: list[int],
+    created_by: int | None = None,
 ) -> list[int]:
     """Return distinct career client ids referenced by the given career jobs."""
     if not career_job_ids:
         return []
-    result = await db.execute(
+    q = (
         select(CareerJob.career_client_id)
+        .join(CareerClient, CareerClient.id == CareerJob.career_client_id)
         .where(CareerJob.id.in_(career_job_ids))
         .where(CareerJob.career_client_id.isnot(None))
     )
+    if created_by is not None:
+        q = q.where(
+            CareerJob.created_by == created_by,
+            CareerClient.created_by == created_by,
+        )
+    result = await db.execute(q)
     return list(
         dict.fromkeys(
             row[0] for row in result.all() if row[0] is not None
@@ -304,17 +328,21 @@ async def check_job_exist(
     job_site_id: int,
     career_client_id: int | None = None,
     links: list[str] | None = None,
-) -> CareerJob | None:
-    """Check if a career job with the same title, job_site_id and career_client_id already exists."""
-
-    query = select(CareerJob).where(
+    created_by: int | None = None,
+) -> bool:
+    """Return True if a matching career job already exists for the owner and site."""
+    parts = [
         CareerJob.title == title,
         CareerJob.job_site_id == job_site_id,
-        CareerJob.career_client_id == career_client_id if career_client_id is not None else None,
-        CareerJob.url.in_(links) if links is not None else None,
-    )
-    result = await db.execute(query)
-    return result.scalars().first() is not None
+    ]
+    if created_by is not None:
+        parts.append(CareerJob.created_by == created_by)
+    if career_client_id is not None:
+        parts.append(CareerJob.career_client_id == career_client_id)
+    if links:
+        parts.append(CareerJob.url.in_(links))
+    result = await db.execute(select(CareerJob.id).where(and_(*parts)))
+    return result.scalar_one_or_none() is not None
 
 
 async def get_total_career_jobs_count(db: AsyncSession) -> int:
@@ -323,11 +351,16 @@ async def get_total_career_jobs_count(db: AsyncSession) -> int:
     return result.scalar() or 0
 
 
-async def get_career_jobs_count_by_site(db: AsyncSession, job_site_id: int) -> int:
+async def get_career_jobs_count_by_site(
+    db: AsyncSession,
+    job_site_id: int,
+    created_by: int | None = None,
+) -> int:
     """Return the count of career jobs for a specific job site."""
-    result = await db.execute(
-        select(func.count(CareerJob.id)).where(CareerJob.job_site_id == job_site_id)
-    )
+    q = select(func.count(CareerJob.id)).where(CareerJob.job_site_id == job_site_id)
+    if created_by is not None:
+        q = q.where(CareerJob.created_by == created_by)
+    result = await db.execute(q)
     return result.scalar() or 0
 
 
@@ -335,6 +368,7 @@ async def get_career_job_dates_grouped(
     db: AsyncSession,
     skip: int = 0,
     limit: int = 50,
+    created_by: int | None = None,
 ) -> tuple[list[tuple[date, int]], int]:
     """
     Return distinct dates of career jobs with job count per date.
@@ -350,17 +384,19 @@ async def get_career_job_dates_grouped(
         .select_from(CareerJob)
         .join(CareerClient, CareerJob.career_client_id == CareerClient.id)
         .where(client_has_emails)
-        .group_by(date_col)
-        .order_by(date_col.desc())
     )
-    count_subq = (
+    if created_by is not None:
+        subq = subq.where(CareerJob.created_by == created_by)
+    subq = subq.group_by(date_col).order_by(date_col.desc())
+    count_subq_base = (
         select(date_col)
         .select_from(CareerJob)
         .join(CareerClient, CareerJob.career_client_id == CareerClient.id)
         .where(client_has_emails)
-        .distinct()
-        .subquery()
     )
+    if created_by is not None:
+        count_subq_base = count_subq_base.where(CareerJob.created_by == created_by)
+    count_subq = count_subq_base.distinct().subquery()
     count_result = await db.execute(select(func.count()).select_from(count_subq))
     total = count_result.scalar() or 0
     result = await db.execute(subq.offset(skip).limit(limit))
@@ -374,6 +410,7 @@ async def get_career_jobs_by_date(
     skip: int = 0,
     limit: int = 50,
     user_id: int | None = None,
+    created_by: int | None = None,
 ) -> tuple[list[tuple[CareerJob, int, int]], int]:
     """
     Return career jobs created on the given date with job application counts.
@@ -390,6 +427,8 @@ async def get_career_jobs_by_date(
         .where(date_col == target_date)
         .where(client_has_emails)
     )
+    if created_by is not None:
+        base_query = base_query.where(CareerJob.created_by == created_by)
     count_query = (
         select(func.count(CareerJob.id))
         .select_from(CareerJob)
@@ -397,6 +436,8 @@ async def get_career_jobs_by_date(
         .where(date_col == target_date)
         .where(client_has_emails)
     )
+    if created_by is not None:
+        count_query = count_query.where(CareerJob.created_by == created_by)
     base_query = base_query.order_by(CareerJob.created_at.desc())
     result = await db.execute(base_query.offset(skip).limit(limit))
     jobs = list(result.scalars().all())
@@ -425,25 +466,31 @@ async def get_career_jobs_by_date(
     return job_app_counts, total
 
 
-async def get_dashboard_stats(db: AsyncSession) -> dict:
-    """Return aggregate counts for the dashboard overview."""
-    from app.modules.email.crud import get_job_email_logs_count
+async def get_dashboard_stats(db: AsyncSession, user_id: int) -> dict:
+    """Return aggregate counts for the dashboard overview for one user."""
+    from app.modules.email.crud import get_job_email_logs_count_for_user
 
-    scrap_count_result = await db.execute(select(func.count(ScrapJob.id)))
+    scrap_q = select(func.count(ScrapJob.id)).where(ScrapJob.created_by == user_id)
+    scrap_count_result = await db.execute(scrap_q)
     total_jobs_executed = scrap_count_result.scalar() or 0
 
-    career_count_result = await db.execute(select(func.count(CareerJob.id)))
+    career_q = select(func.count(CareerJob.id)).where(CareerJob.created_by == user_id)
+    career_count_result = await db.execute(career_q)
     total_job_records = career_count_result.scalar() or 0
 
-    site_count_result = await db.execute(select(func.count(JobSite.id)))
+    site_q = select(func.count(JobSite.id)).where(JobSite.created_by == user_id)
+    site_count_result = await db.execute(site_q)
     total_job_sites = site_count_result.scalar() or 0
 
     client_count_result = await db.execute(
-        select(func.count(CareerClient.id)).where(CareerClient.is_active == True)
+        select(func.count(CareerClient.id)).where(
+            CareerClient.is_active == True,
+            CareerClient.created_by == user_id,
+        )
     )
     total_clients = client_count_result.scalar() or 0
 
-    total_job_email_logs = await get_job_email_logs_count(db)
+    total_job_email_logs = await get_job_email_logs_count_for_user(db, user_id)
 
     return {
         "total_jobs_executed": total_jobs_executed,

@@ -30,7 +30,9 @@ async def list_client_sites_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ClientSiteListResponse:
     """List all client sites with optional filtering and pagination."""
-    return await list_client_sites(db, skip=skip, limit=limit, is_active=is_active)
+    return await list_client_sites(
+        db, skip=skip, limit=limit, is_active=is_active, user_id=current_user.id
+    )
 
 
 @router.get("/{client_site_id}", response_model=ClientSiteResponse)
@@ -40,7 +42,7 @@ async def get_client_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ClientSiteResponse:
     """Retrieve a single client site by ID."""
-    return await get_client_site(db, client_site_id)
+    return await get_client_site(db, client_site_id, user_id=current_user.id)
 
 
 @router.post("/", response_model=ClientSiteResponse, status_code=201)
@@ -50,7 +52,7 @@ async def create_client_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ClientSiteResponse:
     """Create a new client site."""
-    return await create_client_site(db, client_site_create)
+    return await create_client_site(db, client_site_create, user_id=current_user.id)
 
 
 @router.put("/{client_site_id}", response_model=ClientSiteResponse)
@@ -71,4 +73,4 @@ async def delete_client_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Delete a client site by ID."""
-    return await delete_client_site(db, client_site_id)
+    return await delete_client_site(db, client_site_id, user_id=current_user.id)

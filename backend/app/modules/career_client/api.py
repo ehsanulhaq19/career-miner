@@ -72,6 +72,7 @@ async def list_career_client_email_rows_endpoint(
         page=page,
         email_count_sort=email_count,
         created_at_sort=created_at,
+        user_id=current_user.id,
     )
 
 
@@ -141,6 +142,7 @@ async def list_career_clients_endpoint(
         email_found_error=email_found_error,
         has_import_source=has_import_source,
         has_company_details=has_company_details,
+        user_id=current_user.id,
     )
 
 
@@ -153,8 +155,7 @@ async def import_career_clients_endpoint(
     """
     Import up to 100 clients for a named source; upsert by client name or website.
     """
-    _ = current_user
-    return await import_career_clients(db, body)
+    return await import_career_clients(db, body, user_id=current_user.id)
 
 
 @router.get("/locations", response_model=CareerClientLocationsResponse)
@@ -163,7 +164,7 @@ async def get_career_client_locations_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> CareerClientLocationsResponse:
     """Return all distinct locations from career clients."""
-    return await get_career_client_locations(db)
+    return await get_career_client_locations(db, user_id=current_user.id)
 
 
 @router.get(
@@ -194,7 +195,9 @@ async def get_career_client_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> CareerClientResponse:
     """Return a single career client by id."""
-    client = await get_career_client_by_id(db, career_client_id)
+    client = await get_career_client_by_id(
+        db, career_client_id, user_id=current_user.id
+    )
     if client is None:
         raise HTTPException(status_code=404, detail="Career client not found")
     return client
@@ -209,7 +212,10 @@ async def update_career_client_endpoint(
 ) -> CareerClientResponse:
     """Update an existing career client."""
     updated = await update_career_client(
-        db, career_client_id, career_client_update
+        db,
+        career_client_id,
+        career_client_update,
+        user_id=current_user.id,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="Career client not found")
@@ -224,7 +230,9 @@ async def bulk_update_career_clients_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Bulk update career clients by location."""
-    count = await bulk_update_career_clients(db, location, bulk_update)
+    count = await bulk_update_career_clients(
+        db, location, bulk_update, user_id=current_user.id
+    )
     return {"updated_count": count}
 
 
@@ -245,7 +253,7 @@ async def scan_career_clients_endpoint(
             status_code=400,
             detail="At least one criterion must be provided",
         )
-    result = await scan_career_clients(db, criteria)
+    result = await scan_career_clients(db, criteria, user_id=current_user.id)
     return {"deactivated_count": result.deactivated_count}
 
 
@@ -276,5 +284,7 @@ async def remove_invalid_emails_endpoint(
     """
     Remove specified invalid emails from clients.
     """
-    count = await remove_invalid_emails(db, request.clients)
+    count = await remove_invalid_emails(
+        db, request.clients, user_id=current_user.id
+    )
     return {"updated_count": count}

@@ -17,10 +17,15 @@ async def get_scrap_client_jobs(
     skip: int = 0,
     limit: int = 100,
     status: str | None = None,
+    created_by: int | None = None,
 ) -> tuple[list[ScrapClientJob], int]:
     """Retrieve a paginated list of scrap client jobs with optional filters."""
     query = select(ScrapClientJob)
     count_query = select(func.count(ScrapClientJob.id))
+
+    if created_by is not None:
+        query = query.where(ScrapClientJob.created_by == created_by)
+        count_query = count_query.where(ScrapClientJob.created_by == created_by)
 
     if status is not None:
         query = query.where(ScrapClientJob.status == status)
@@ -93,18 +98,21 @@ async def update_scrap_client_job_meta_data(
     return scrap_job
 
 
-async def get_active_scrap_client_jobs(db: AsyncSession) -> list[ScrapClientJob]:
+async def get_active_scrap_client_jobs(
+    db: AsyncSession, created_by: int | None = None
+) -> list[ScrapClientJob]:
     """Return scrap client jobs with status pending or in_progress."""
-    result = await db.execute(
-        select(ScrapClientJob).where(
-            ScrapClientJob.status.in_(
-                [
-                    ScrapClientJobStatus.PENDING.value,
-                    ScrapClientJobStatus.IN_PROGRESS.value,
-                ]
-            )
+    q = select(ScrapClientJob).where(
+        ScrapClientJob.status.in_(
+            [
+                ScrapClientJobStatus.PENDING.value,
+                ScrapClientJobStatus.IN_PROGRESS.value,
+            ]
         )
     )
+    if created_by is not None:
+        q = q.where(ScrapClientJob.created_by == created_by)
+    result = await db.execute(q)
     return list(result.scalars().all())
 
 

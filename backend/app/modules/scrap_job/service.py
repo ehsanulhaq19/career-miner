@@ -38,6 +38,7 @@ from app.modules.websocket.service import broadcast_scrap_job_status
 async def start_scrap_job(
     db: AsyncSession,
     job_site_id: int,
+    user_id: int,
     load_more_on_scroll: bool = False,
     max_scroll: int = 10,
     depth_levels: int | None = None,
@@ -50,8 +51,12 @@ async def start_scrap_job(
     job_site = await get_job_site_by_id(db, job_site_id)
     if job_site is None:
         raise NotFoundException(detail="Job site not found")
+    if job_site.created_by != user_id:
+        raise NotFoundException(detail="Job site not found")
 
-    active_jobs = await get_active_scrap_jobs_for_site(db, job_site_id)
+    active_jobs = await get_active_scrap_jobs_for_site(
+        db, job_site_id, created_by=user_id
+    )
     if active_jobs:
         raise BadRequestException(
             detail="An active scrap job already exists for this job site"
@@ -69,6 +74,7 @@ async def start_scrap_job(
             "job_site_id": job_site_id,
             "status": ScrapJobStatus.PENDING.value,
             "meta_data": meta_data,
+            "created_by": user_id,
         },
     )
     response = ScrapJobResponse.model_validate(scrap_job)
@@ -76,12 +82,14 @@ async def start_scrap_job(
     return response
 
 
-async def stop_scrap_job(db: AsyncSession, scrap_job_id: int) -> ScrapJobResponse:
+async def stop_scrap_job(
+    db: AsyncSession, scrap_job_id: int, user_id: int
+) -> ScrapJobResponse:
     """
     Stop a scrap job that is pending or in progress.
     """
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
-    if scrap_job is None:
+    if scrap_job is None or scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap job not found")
     if scrap_job.status not in (
         ScrapJobStatus.PENDING.value,
@@ -97,13 +105,15 @@ async def stop_scrap_job(db: AsyncSession, scrap_job_id: int) -> ScrapJobRespons
     return response
 
 
-async def resume_scrap_job(db: AsyncSession, scrap_job_id: int) -> ScrapJobResponse:
+async def resume_scrap_job(
+    db: AsyncSession, scrap_job_id: int, user_id: int
+) -> ScrapJobResponse:
     """
     Resume a stopped scrap job by setting its status to in_progress.
     Only jobs with status stopped can be resumed.
     """
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
-    if scrap_job is None:
+    if scrap_job is None or scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap job not found")
     if scrap_job.status != ScrapJobStatus.STOPPED.value:
         raise BadRequestException(
@@ -126,10 +136,16 @@ async def list_scrap_jobs(
     limit: int = 100,
     job_site_id: int | None = None,
     status: str | None = None,
+    user_id: int | None = None,
 ) -> ScrapJobListResponse:
     """Return a paginated list of scrap jobs."""
     items, total = await get_scrap_jobs(
-        db, skip=skip, limit=limit, job_site_id=job_site_id, status=status,
+        db,
+        skip=skip,
+        limit=limit,
+        job_site_id=job_site_id,
+        status=status,
+        created_by=user_id,
     )
     return ScrapJobListResponse(
         items=[ScrapJobResponse.model_validate(item) for item in items],
@@ -137,10 +153,14 @@ async def list_scrap_jobs(
     )
 
 
-async def get_scrap_job(db: AsyncSession, scrap_job_id: int) -> ScrapJobResponse:
+async def get_scrap_job(
+    db: AsyncSession, scrap_job_id: int, user_id: int | None = None
+) -> ScrapJobResponse:
     """Return a single scrap job or raise NotFoundException."""
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job is None:
+        raise NotFoundException(detail="Scrap job not found")
+    if user_id is not None and scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap job not found")
     return ScrapJobResponse.model_validate(scrap_job)
 
@@ -183,6 +203,7 @@ async def create_log_and_broadcast(
 async def start_test_scrap_job(
     db: AsyncSession,
     request: TestScrapRequest,
+    user_id: int,
 ) -> ScrapJobResponse:
     """
     Create and start a test scrap job with custom parameters.
@@ -191,6 +212,8 @@ async def start_test_scrap_job(
     """
     job_site = await get_job_site_by_id(db, request.job_site_id)
     if job_site is None:
+        raise NotFoundException(detail="Job site not found")
+    if job_site.created_by != user_id:
         raise NotFoundException(detail="Job site not found")
 
     meta_data = {
@@ -205,6 +228,7 @@ async def start_test_scrap_job(
             "job_site_id": request.job_site_id,
             "status": ScrapJobStatus.PENDING.value,
             "meta_data": meta_data,
+            "created_by": user_id,
         },
     )
     response = ScrapJobResponse.model_validate(scrap_job)
@@ -215,10 +239,13 @@ async def start_test_scrap_job(
 async def get_scrap_job_logs(
     db: AsyncSession,
     scrap_job_id: int,
+    user_id: int | None = None,
 ) -> ScrapJobLogListResponse:
     """Return all logs for a scrap job."""
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job is None:
+        raise NotFoundException(detail="Scrap job not found")
+    if user_id is not None and scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap job not found")
     logs = await get_scrap_job_logs_by_scrap_job_id(db, scrap_job_id)
     return ScrapJobLogListResponse(
@@ -229,10 +256,13 @@ async def get_scrap_job_logs(
 async def list_scrappers_for_scrap_job_service(
     db: AsyncSession,
     scrap_job_id: int,
+    user_id: int | None = None,
 ) -> ScrapperListResponse:
     """Return all scrapper HTML artifacts linked to a scrap job."""
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job is None:
+        raise NotFoundException(detail="Scrap job not found")
+    if user_id is not None and scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap job not found")
     rows = await list_scrappers_for_scrap_job(db, scrap_job_id)
     return ScrapperListResponse(
@@ -244,10 +274,13 @@ async def get_scrapper_html_for_scrap_job(
     db: AsyncSession,
     scrap_job_id: int,
     scrapper_id: int,
+    user_id: int | None = None,
 ) -> ScrapperHtmlPreviewResponse:
     """Load stored HTML for a scrapper row that belongs to the given scrap job."""
     scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
     if scrap_job is None:
+        raise NotFoundException(detail="Scrap job not found")
+    if user_id is not None and scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap job not found")
     if not await scrap_job_owns_scrapper(db, scrap_job_id, scrapper_id):
         raise NotFoundException(detail="Scrapper not found for this job")

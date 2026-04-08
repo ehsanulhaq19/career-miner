@@ -421,6 +421,7 @@ async def _parse_clients_via_llm(html: str) -> list[dict]:
 async def scrape_clients_from_url(
     db: AsyncSession,
     url: str,
+    created_by: int,
     use_discovery_when_no_email: bool = True,
     max_pages: int = 5,
     scrap_client_job_id: int | None = None,
@@ -520,6 +521,7 @@ async def scrape_clients_from_url(
             emails=emails,
             detail=description or None,
             size=None,
+            created_by=created_by,
         )
         if not career_client:
             continue

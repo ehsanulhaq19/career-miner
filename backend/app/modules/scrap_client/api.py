@@ -120,7 +120,9 @@ async def start_scrap_client_from_site_endpoint(
     Create a scrap client job with client_site_id stored on the job row (like job_site_id on scrap jobs),
     then run the site scraper in the background using the returned job id.
     """
-    result = await start_scrap_client_from_site(db, request.client_site_id)
+    result = await start_scrap_client_from_site(
+        db, request.client_site_id, current_user.id
+    )
     background_tasks.add_task(
         _run_site_scraper_background,
         result.id,
@@ -140,7 +142,9 @@ async def start_scrap_client_from_url_endpoint(
     Create a scrap client job with source_url stored on the job row, then run the URL scraper
     in the background using the returned job id.
     """
-    result = await start_scrap_client_from_url(db, request.url)
+    result = await start_scrap_client_from_url(
+        db, request.url, current_user.id
+    )
     background_tasks.add_task(
         _run_url_scraper_background,
         result.id,
@@ -160,7 +164,9 @@ async def test_scrap_client_from_site_endpoint(
     Create a test scrap client job with client_site_id on the job row, then run the site scraper
     in the background with test mode enabled.
     """
-    result = await start_test_scrap_client_from_site(db, request)
+    result = await start_test_scrap_client_from_site(
+        db, request, current_user.id
+    )
     background_tasks.add_task(
         _run_site_scraper_background,
         result.id,
@@ -181,7 +187,7 @@ async def start_scrap_client_job_endpoint(
     Create a scrap client job; when client_ids are provided, assigns scrap_client_job_id on those
     career clients immediately, then runs the email scraper in the background.
     """
-    result = await start_scrap_client_job(db, request)
+    result = await start_scrap_client_job(db, request, current_user.id)
     background_tasks.add_task(
         _run_email_scraper_background,
         result.id,
@@ -202,7 +208,9 @@ async def start_scrap_client_details_endpoint(
     Create a scrap client job that enriches career client profile fields from the web.
     Assigns scrap_client_job_id on the selected clients, then runs the details worker in the background.
     """
-    result = await start_scrap_client_details_job(db, request)
+    result = await start_scrap_client_details_job(
+        db, request, current_user.id
+    )
     background_tasks.add_task(_run_client_details_background, result.id)
     return result
 
@@ -219,7 +227,7 @@ async def test_scrap_client_job_endpoint(
     When client_ids are present, assigns scrap_client_job_id on those career clients at initiation.
     Does not persist scraped emails; background worker still links clients to this job id.
     """
-    result = await start_test_scrap_client_job(db, request)
+    result = await start_test_scrap_client_job(db, request, current_user.id)
     background_tasks.add_task(
         _run_email_scraper_background,
         result.id,
@@ -237,7 +245,7 @@ async def get_scrap_client_status_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientStatusResponse:
     """Return scraping progress: pending, processing, completed, failed counts."""
-    return await get_scrap_client_status(db)
+    return await get_scrap_client_status(db, current_user.id)
 
 
 @router.post("/{scrap_client_job_id}/stop", response_model=ScrapClientJobResponse)
@@ -248,7 +256,7 @@ async def stop_scrap_client_job_endpoint(
 ) -> ScrapClientJobResponse:
     """Stop a scrap client job that is currently in progress."""
     logger.info("Stopping scrap client job: id=%s", scrap_client_job_id)
-    return await stop_scrap_client_job(db, scrap_client_job_id)
+    return await stop_scrap_client_job(db, scrap_client_job_id, current_user.id)
 
 
 @router.post("/{scrap_client_job_id}/resume", response_model=ScrapClientJobResponse)
@@ -260,7 +268,9 @@ async def resume_scrap_client_job_endpoint(
 ) -> ScrapClientJobResponse:
     """Resume a stopped scrap client job."""
     logger.info("Resuming scrap client job: id=%s", scrap_client_job_id)
-    result = await resume_scrap_client_job(db, scrap_client_job_id)
+    result = await resume_scrap_client_job(
+        db, scrap_client_job_id, current_user.id
+    )
     from app.modules.scrap_client.crud import get_scrap_client_job_by_id
 
     job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
@@ -314,7 +324,11 @@ async def list_scrap_client_jobs_endpoint(
 ) -> ScrapClientJobListResponse:
     """List all scrap client jobs with optional filtering and pagination."""
     return await list_scrap_client_jobs(
-        db, skip=skip, limit=limit, status=status,
+        db,
+        skip=skip,
+        limit=limit,
+        status=status,
+        user_id=current_user.id,
     )
 
 
@@ -325,7 +339,7 @@ async def get_scrap_client_job_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientJobResponse:
     """Retrieve a single scrap client job by ID."""
-    return await get_scrap_client_job(db, scrap_client_job_id)
+    return await get_scrap_client_job(db, scrap_client_job_id, current_user.id)
 
 
 @router.get("/{scrap_client_job_id}/logs", response_model=ScrapClientLogListResponse)
@@ -335,7 +349,9 @@ async def get_scrap_client_job_logs_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapClientLogListResponse:
     """Retrieve scrap client job logs for a given job."""
-    return await get_scrap_client_job_logs(db, scrap_client_job_id)
+    return await get_scrap_client_job_logs(
+        db, scrap_client_job_id, user_id=current_user.id
+    )
 
 
 @router.get("/{scrap_client_job_id}/scrappers", response_model=ScrapperListResponse)
@@ -345,7 +361,9 @@ async def list_scrap_client_job_scrappers_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ScrapperListResponse:
     """List stored HTML pages (scrappers) associated with a scrap client job."""
-    return await list_scrappers_for_scrap_client_job_service(db, scrap_client_job_id)
+    return await list_scrappers_for_scrap_client_job_service(
+        db, scrap_client_job_id, user_id=current_user.id
+    )
 
 
 @router.get(
@@ -360,5 +378,5 @@ async def get_scrap_client_job_scrapper_html_endpoint(
 ) -> ScrapperHtmlPreviewResponse:
     """Return raw HTML content for preview for one scrapper linked to the job."""
     return await get_scrapper_html_for_scrap_client_job(
-        db, scrap_client_job_id, scrapper_id
+        db, scrap_client_job_id, scrapper_id, user_id=current_user.id
     )

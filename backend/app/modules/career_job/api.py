@@ -69,7 +69,9 @@ async def get_career_job_dates_grouped_endpoint(
     Return distinct dates with job counts, sorted by date descending.
     Used for tabular UI - by default shows only date groups.
     """
-    return await get_career_job_dates_grouped(db, skip=skip, limit=limit)
+    return await get_career_job_dates_grouped(
+        db, skip=skip, limit=limit, user_id=current_user.id
+    )
 
 
 @router.get("/by-date", response_model=CareerJobWithCountsListResponse)

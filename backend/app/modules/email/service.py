@@ -131,6 +131,7 @@ async def list_job_email_logs(
     created_date_from: str | None = None,
     created_date_to: str | None = None,
     search: str | None = None,
+    user_id: int | None = None,
 ):
     """
     Return paginated job email logs with optional filters.
@@ -163,6 +164,7 @@ async def list_job_email_logs(
         created_date_from=parsed_from,
         created_date_to=parsed_to,
         search=search,
+        user_id=user_id,
     )
 
     items = []

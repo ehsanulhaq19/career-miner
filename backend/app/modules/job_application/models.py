@@ -73,6 +73,9 @@ class BulkJobApplication(Base):
         nullable=False,
     )
     meta_data = Column(JSON, default=dict, nullable=True)
+    workflow_execution_id = Column(
+        Integer, ForeignKey("workflow_executions.id"), nullable=True
+    )
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -115,6 +118,7 @@ class JobApplication(Base):
     meta_data = Column(JSON, default=dict)
     is_email_send = Column(Boolean, default=False, nullable=False)
     to_emails = Column(JSON, default=list)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
 
@@ -164,6 +168,9 @@ class BulkJobApplicationEmailSend(Base):
     )
     min_similarity_score = Column(Float, nullable=True)
     meta_data = Column(JSON, default=dict, nullable=True)
+    workflow_execution_id = Column(
+        Integer, ForeignKey("workflow_executions.id"), nullable=True
+    )
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

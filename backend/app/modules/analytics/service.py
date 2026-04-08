@@ -36,10 +36,10 @@ async def get_analytics_summary(
         raise BadRequestException(detail="date_from must be on or before date_to")
 
     scrap_web_rows = await analytics_crud.fetch_scrap_web_rows_for_range(
-        db, d_from, d_to
+        db, d_from, d_to, user_id
     )
     scrap_client_rows = await analytics_crud.fetch_scrap_client_rows_for_range(
-        db, d_from, d_to
+        db, d_from, d_to, user_id
     )
     sw_runs, sw_scraped, sw_by_day = analytics_crud.aggregate_scrap_web_from_rows(
         scrap_web_rows
@@ -49,10 +49,10 @@ async def get_analytics_summary(
     )
 
     jobs_created = await analytics_crud.count_career_jobs_created_in_range(
-        db, d_from, d_to
+        db, d_from, d_to, user_id
     )
     clients_created = await analytics_crud.count_career_clients_created_in_range(
-        db, d_from, d_to
+        db, d_from, d_to, user_id
     )
     apps_created = await analytics_crud.count_job_applications_created_in_range(
         db, user_id, d_from, d_to
@@ -65,8 +65,12 @@ async def get_analytics_summary(
         db, user_id, d_from, d_to
     )
 
-    jobs_by_day = await analytics_crud.career_jobs_created_by_day(db, d_from, d_to)
-    clients_by_day = await analytics_crud.career_clients_created_by_day(db, d_from, d_to)
+    jobs_by_day = await analytics_crud.career_jobs_created_by_day(
+        db, d_from, d_to, user_id
+    )
+    clients_by_day = await analytics_crud.career_clients_created_by_day(
+        db, d_from, d_to, user_id
+    )
     apps_by_day = await analytics_crud.job_applications_created_by_day(
         db, user_id, d_from, d_to
     )

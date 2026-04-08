@@ -11,10 +11,15 @@ async def get_job_sites(
     skip: int = 0,
     limit: int = 100,
     is_active: bool | None = None,
+    created_by: int | None = None,
 ) -> tuple[list[JobSite], int]:
     """Retrieve a paginated list of job sites with optional active filter."""
     query = select(JobSite)
     count_query = select(func.count(JobSite.id))
+
+    if created_by is not None:
+        query = query.where(JobSite.created_by == created_by)
+        count_query = count_query.where(JobSite.created_by == created_by)
 
     if is_active is not None:
         query = query.where(JobSite.is_active == is_active)

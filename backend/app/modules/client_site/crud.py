@@ -9,10 +9,15 @@ async def get_client_sites(
     skip: int = 0,
     limit: int = 100,
     is_active: bool | None = None,
+    created_by: int | None = None,
 ) -> tuple[list[ClientSite], int]:
     """Retrieve a paginated list of client sites with optional active filter."""
     query = select(ClientSite)
     count_query = select(func.count(ClientSite.id))
+
+    if created_by is not None:
+        query = query.where(ClientSite.created_by == created_by)
+        count_query = count_query.where(ClientSite.created_by == created_by)
 
     if is_active is not None:
         query = query.where(ClientSite.is_active == is_active)

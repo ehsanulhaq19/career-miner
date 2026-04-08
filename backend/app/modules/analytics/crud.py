@@ -23,13 +23,14 @@ SCRAP_JOB_FINISHED_STATUSES: tuple[str, ...] = (
 
 
 async def fetch_scrap_web_rows_for_range(
-    db: AsyncSession, date_from: date, date_to: date
+    db: AsyncSession, date_from: date, date_to: date, user_id: int
 ) -> list[tuple[object, dict | None]]:
     """
     Return (updated_at, meta_data) pairs for scrap jobs that finished in the date range.
     """
     result = await db.execute(
         select(ScrapJob.updated_at, ScrapJob.meta_data).where(
+            ScrapJob.created_by == user_id,
             ScrapJob.status.in_(SCRAP_JOB_FINISHED_STATUSES),
             cast(ScrapJob.updated_at, Date) >= date_from,
             cast(ScrapJob.updated_at, Date) <= date_to,
@@ -39,13 +40,14 @@ async def fetch_scrap_web_rows_for_range(
 
 
 async def fetch_scrap_client_rows_for_range(
-    db: AsyncSession, date_from: date, date_to: date
+    db: AsyncSession, date_from: date, date_to: date, user_id: int
 ) -> list[tuple[object, dict | None]]:
     """
     Return (updated_at, meta_data) pairs for scrap client jobs that finished in the range.
     """
     result = await db.execute(
         select(ScrapClientJob.updated_at, ScrapClientJob.meta_data).where(
+            ScrapClientJob.created_by == user_id,
             ScrapClientJob.status.in_(SCRAP_JOB_FINISHED_STATUSES),
             cast(ScrapClientJob.updated_at, Date) >= date_from,
             cast(ScrapClientJob.updated_at, Date) <= date_to,
@@ -55,11 +57,12 @@ async def fetch_scrap_client_rows_for_range(
 
 
 async def count_career_jobs_created_in_range(
-    db: AsyncSession, date_from: date, date_to: date
+    db: AsyncSession, date_from: date, date_to: date, user_id: int
 ) -> int:
     """Count career jobs whose created_at date falls in the inclusive range."""
     result = await db.execute(
         select(func.count(CareerJob.id)).where(
+            CareerJob.created_by == user_id,
             cast(CareerJob.created_at, Date) >= date_from,
             cast(CareerJob.created_at, Date) <= date_to,
         )
@@ -68,11 +71,12 @@ async def count_career_jobs_created_in_range(
 
 
 async def career_jobs_created_by_day(
-    db: AsyncSession, date_from: date, date_to: date
+    db: AsyncSession, date_from: date, date_to: date, user_id: int
 ) -> dict[date, int]:
     """Return map of calendar day to number of career jobs created."""
     result = await db.execute(
         select(cast(CareerJob.created_at, Date), func.count(CareerJob.id)).where(
+            CareerJob.created_by == user_id,
             cast(CareerJob.created_at, Date) >= date_from,
             cast(CareerJob.created_at, Date) <= date_to,
         ).group_by(cast(CareerJob.created_at, Date))
@@ -81,11 +85,12 @@ async def career_jobs_created_by_day(
 
 
 async def count_career_clients_created_in_range(
-    db: AsyncSession, date_from: date, date_to: date
+    db: AsyncSession, date_from: date, date_to: date, user_id: int
 ) -> int:
     """Count active career clients created in the date range."""
     result = await db.execute(
         select(func.count(CareerClient.id)).where(
+            CareerClient.created_by == user_id,
             CareerClient.is_active.is_(True),
             cast(CareerClient.created_at, Date) >= date_from,
             cast(CareerClient.created_at, Date) <= date_to,
@@ -95,11 +100,12 @@ async def count_career_clients_created_in_range(
 
 
 async def career_clients_created_by_day(
-    db: AsyncSession, date_from: date, date_to: date
+    db: AsyncSession, date_from: date, date_to: date, user_id: int
 ) -> dict[date, int]:
     """Return map of day to active career clients created."""
     result = await db.execute(
         select(cast(CareerClient.created_at, Date), func.count(CareerClient.id)).where(
+            CareerClient.created_by == user_id,
             CareerClient.is_active.is_(True),
             cast(CareerClient.created_at, Date) >= date_from,
             cast(CareerClient.created_at, Date) <= date_to,
@@ -115,6 +121,7 @@ async def count_job_applications_created_in_range(
     result = await db.execute(
         select(func.count(JobApplication.id)).where(
             JobApplication.user_id == user_id,
+            JobApplication.created_by == user_id,
             cast(JobApplication.created_at, Date) >= date_from,
             cast(JobApplication.created_at, Date) <= date_to,
         )
@@ -132,6 +139,7 @@ async def job_applications_created_by_day(
             func.count(JobApplication.id),
         ).where(
             JobApplication.user_id == user_id,
+            JobApplication.created_by == user_id,
             cast(JobApplication.created_at, Date) >= date_from,
             cast(JobApplication.created_at, Date) <= date_to,
         ).group_by(cast(JobApplication.created_at, Date))
@@ -156,6 +164,7 @@ async def count_job_application_emails_by_status_in_range(
         )
         .where(
             JobApplication.user_id == user_id,
+            JobApplication.created_by == user_id,
             cast(EmailLog.created_at, Date) >= date_from,
             cast(EmailLog.created_at, Date) <= date_to,
         )
@@ -187,6 +196,7 @@ async def job_application_emails_by_day_and_status(
         )
         .where(
             JobApplication.user_id == user_id,
+            JobApplication.created_by == user_id,
             cast(EmailLog.created_at, Date) >= date_from,
             cast(EmailLog.created_at, Date) <= date_to,
         )

@@ -70,6 +70,7 @@ async def list_career_jobs(
         has_client_emails=has_client_emails,
         created_date_from=parsed_from,
         created_date_to=parsed_to,
+        created_by=user_id,
     )
 
     seen_job_ids: set[int] = set()
@@ -97,6 +98,12 @@ async def list_career_jobs(
             career_client_name = client_cache.get(item.career_client_id)
             if career_client_name is None:
                 client = await get_career_client_by_id(db, item.career_client_id)
+                if (
+                    client is not None
+                    and user_id is not None
+                    and client.created_by != user_id
+                ):
+                    client = None
                 career_client_name = client.name if client else None
                 client_cache[item.career_client_id] = career_client_name
 
@@ -122,6 +129,8 @@ async def get_career_job(
     career_job = await get_career_job_by_id(db, career_job_id)
     if career_job is None:
         raise NotFoundException(detail="Career job not found")
+    if user_id is not None and career_job.created_by != user_id:
+        raise NotFoundException(detail="Career job not found")
 
     job_data = CareerJobDetailResponse.model_validate(career_job)
     if career_job.job_site_id is not None:
@@ -131,6 +140,8 @@ async def get_career_job(
         job_data.job_site_name = None
     if career_job.career_client_id:
         client = await get_career_client_by_id(db, career_job.career_client_id)
+        if client and user_id is not None and client.created_by != user_id:
+            client = None
         if client:
             job_data.career_client_name = client.name
             job_data.career_client_emails = list(client.emails or [])
@@ -198,10 +209,11 @@ async def mark_all_jobs_seen(
             has_client_emails=has_client_emails,
             created_date_from=parsed_from,
             created_date_to=parsed_to,
+            created_by=user_id,
         )
         count = await mark_jobs_seen_for_user_by_ids(db, user_id, job_ids)
     else:
-        count = await mark_all_jobs_seen_for_user(db, user_id)
+        count = await mark_all_jobs_seen_for_user(db, user_id, created_by=user_id)
     return {"marked_count": count}
 
 
@@ -209,6 +221,9 @@ async def mark_job_seen(
     db: AsyncSession, career_job_id: int, user_id: int
 ) -> None:
     """Mark a career job as seen by the user. Creates record if not exists."""
+    career_job = await get_career_job_by_id(db, career_job_id)
+    if career_job is None or career_job.created_by != user_id:
+        raise NotFoundException(detail="Career job not found")
     existing = await get_career_job_user(db, career_job_id, user_id)
     if existing is None:
         await create_career_job_user(db, career_job_id, user_id)
@@ -218,6 +233,7 @@ async def get_career_job_dates_grouped(
     db: AsyncSession,
     skip: int = 0,
     limit: int = 50,
+    user_id: int | None = None,
 ):
     """Return date groups with job counts for tabular UI."""
     from app.modules.career_job.crud import get_career_job_dates_grouped as crud_dates
@@ -226,7 +242,9 @@ async def get_career_job_dates_grouped(
         CareerJobDateGroupResponse,
     )
 
-    rows, total = await crud_dates(db, skip=skip, limit=limit)
+    rows, total = await crud_dates(
+        db, skip=skip, limit=limit, created_by=user_id
+    )
     items = [
         CareerJobDateGroupResponse(
             date=d.isoformat() if d else "",
@@ -267,7 +285,12 @@ async def get_career_jobs_by_date(
         raise BadRequestException(detail="Invalid date format. Use YYYY-MM-DD")
 
     rows, total = await crud_by_date(
-        db, target_date=parsed, skip=skip, limit=limit, user_id=user_id
+        db,
+        target_date=parsed,
+        skip=skip,
+        limit=limit,
+        user_id=user_id,
+        created_by=user_id,
     )
     site_cache = {}
     client_cache = {}
@@ -290,6 +313,12 @@ async def get_career_jobs_by_date(
                 career_client_name, career_client_emails, career_client_official_website = cached
             else:
                 client = await get_career_client_by_id(db, job.career_client_id)
+                if (
+                    client is not None
+                    and user_id is not None
+                    and client.created_by != user_id
+                ):
+                    client = None
                 career_client_name = client.name if client else None
                 career_client_emails = list(client.emails or []) if client else []
                 career_client_official_website = client.official_website if client else None
@@ -327,13 +356,15 @@ async def get_dashboard_stats(
         get_active_job_applications_count_by_similarity,
     )
 
-    stats = await crud_dashboard_stats(db)
+    stats = await crud_dashboard_stats(db, user_id)
 
-    sites, _ = await get_job_sites(db, skip=0, limit=1000)
+    sites, _ = await get_job_sites(db, skip=0, limit=1000, created_by=user_id)
 
     job_site_cards = []
     for site in sites:
-        total_jobs = await get_career_jobs_count_by_site(db, site.id)
+        total_jobs = await get_career_jobs_count_by_site(
+            db, site.id, created_by=user_id
+        )
         job_site_cards.append(
             JobSiteCardResponse(
                 id=site.id,

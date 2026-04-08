@@ -93,6 +93,7 @@ async def get_career_clients_by_ids_or_all(
     db: AsyncSession,
     client_ids: list[int] | None = None,
     all_clients: bool = False,
+    created_by: int | None = None,
 ) -> list[CareerClient]:
     """
     Retrieve career clients by ids or all active clients.
@@ -100,6 +101,8 @@ async def get_career_clients_by_ids_or_all(
     True and no client_ids, returns all active clients.
     """
     query = select(CareerClient).where(CareerClient.is_active.is_(True))
+    if created_by is not None:
+        query = query.where(CareerClient.created_by == created_by)
     if client_ids:
         query = query.where(CareerClient.id.in_(client_ids))
     query = query.order_by(CareerClient.id.desc())
@@ -115,6 +118,7 @@ async def get_career_clients(
     email_found_error: bool | None = None,
     has_import_source: bool | None = None,
     has_company_details: bool | None = None,
+    created_by: int | None = None,
 ) -> tuple[list[CareerClient], int]:
     """Retrieve a paginated list of active career clients in descending order by id."""
     base_query = (
@@ -122,6 +126,8 @@ async def get_career_clients(
         .where(CareerClient.is_active.is_(True))
         .order_by(CareerClient.id.desc())
     )
+    if created_by is not None:
+        base_query = base_query.where(CareerClient.created_by == created_by)
     base_query = _apply_has_email_filter(base_query, has_email_information)
     base_query = _apply_email_found_error_filter(base_query, email_found_error)
     base_query = _apply_has_import_source_filter(base_query, has_import_source)
@@ -131,6 +137,8 @@ async def get_career_clients(
     count_query = select(func.count(CareerClient.id)).where(
         CareerClient.is_active.is_(True)
     )
+    if created_by is not None:
+        count_query = count_query.where(CareerClient.created_by == created_by)
     if has_email_information is True:
         count_query = count_query.where(
             func.json_array_length(CareerClient.emails) > 0
@@ -164,32 +172,35 @@ async def get_career_client_by_id(
 
 
 async def get_career_client_by_link(
-    db: AsyncSession, link: str | None
+    db: AsyncSession, link: str | None, created_by: int | None = None
 ) -> CareerClient | None:
     """Retrieve a career client by link when link is non-empty."""
     if not link or not str(link).strip():
         return None
-    result = await db.execute(
-        select(CareerClient).where(CareerClient.link == link.strip())
-    )
+    q = select(CareerClient).where(CareerClient.link == link.strip())
+    if created_by is not None:
+        q = q.where(CareerClient.created_by == created_by)
+    result = await db.execute(q)
     return result.scalars().first()
 
 
 async def get_career_client_by_name(
-    db: AsyncSession, name: str | None
+    db: AsyncSession, name: str | None, created_by: int | None = None
 ) -> CareerClient | None:
     """Retrieve a career client by name when name is non-empty."""
     if not name or not str(name).strip():
         return None
-    result = await db.execute(
-        select(CareerClient).where(CareerClient.name == name.strip())
-    )
+    q = select(CareerClient).where(CareerClient.name == name.strip())
+    if created_by is not None:
+        q = q.where(CareerClient.created_by == created_by)
+    result = await db.execute(q)
     return result.scalars().first()
 
 
 async def get_career_client_by_normalized_host(
     db: AsyncSession,
     normalized_host: str,
+    created_by: int | None = None,
 ) -> CareerClient | None:
     """
     Find a career client whose official_website normalizes to the same host key.
@@ -197,8 +208,9 @@ async def get_career_client_by_normalized_host(
     if not normalized_host or not str(normalized_host).strip():
         return None
     host = str(normalized_host).strip().lower()
+    owner_sql = " AND created_by = :created_by " if created_by is not None else ""
     stmt = text(
-        """
+        f"""
         SELECT id FROM career_clients
         WHERE official_website IS NOT NULL
           AND trim(official_website) != ''
@@ -218,10 +230,15 @@ async def get_career_client_by_normalized_host(
               ''
             )
           ) = :host
+          {owner_sql}
         ORDER BY id DESC
         LIMIT 1
         """
-    ).bindparams(host=host)
+    )
+    if created_by is not None:
+        stmt = stmt.bindparams(host=host, created_by=created_by)
+    else:
+        stmt = stmt.bindparams(host=host)
     result = await db.execute(stmt)
     row = result.first()
     if row is None:
@@ -233,17 +250,18 @@ async def find_career_client_for_import(
     db: AsyncSession,
     name: str | None,
     normalized_website_host: str | None,
+    created_by: int,
 ) -> CareerClient | None:
     """
     Resolve an existing career client by exact name or by normalized website host.
     """
     if name and str(name).strip():
-        found = await get_career_client_by_name(db, name)
+        found = await get_career_client_by_name(db, name, created_by=created_by)
         if found is not None:
             return found
     if normalized_website_host:
         return await get_career_client_by_normalized_host(
-            db, normalized_website_host
+            db, normalized_website_host, created_by=created_by
         )
     return None
 
@@ -302,6 +320,7 @@ async def assign_scrap_client_job_to_career_clients(
     db: AsyncSession,
     career_client_ids: list[int],
     scrap_client_job_id: int,
+    created_by: int,
 ) -> None:
     """
     Assign scrap_client_job_id to the given career clients when a job is initiated.
@@ -312,6 +331,7 @@ async def assign_scrap_client_job_to_career_clients(
     await db.execute(
         update(CareerClient)
         .where(CareerClient.id.in_(unique_ids))
+        .where(CareerClient.created_by == created_by)
         .values(scrap_client_job_id=scrap_client_job_id)
     )
     await db.flush()
@@ -352,7 +372,7 @@ async def get_total_career_clients_count(db: AsyncSession) -> int:
 
 
 async def bulk_update_career_clients_by_location(
-    db: AsyncSession, location: str, data: dict
+    db: AsyncSession, location: str, data: dict, created_by: int
 ) -> int:
     """Update all career clients with the given location. Returns count of updated rows."""
     from sqlalchemy import update
@@ -360,6 +380,7 @@ async def bulk_update_career_clients_by_location(
     stmt = (
         update(CareerClient)
         .where(CareerClient.location == location)
+        .where(CareerClient.created_by == created_by)
         .values(**data)
     )
     result = await db.execute(stmt)
@@ -368,15 +389,17 @@ async def bulk_update_career_clients_by_location(
 
 async def get_distinct_career_client_locations(
     db: AsyncSession,
+    created_by: int | None = None,
 ) -> list[str]:
     """Retrieve all distinct non-null, non-empty location values from career clients."""
-    result = await db.execute(
+    q = (
         select(CareerClient.location)
         .where(CareerClient.location.isnot(None))
         .where(CareerClient.location != "")
-        .distinct()
-        .order_by(CareerClient.location)
     )
+    if created_by is not None:
+        q = q.where(CareerClient.created_by == created_by)
+    result = await db.execute(q.distinct().order_by(CareerClient.location))
     return [row[0] for row in result.all() if row[0]]
 
 
@@ -384,6 +407,7 @@ async def scan_and_deactivate_career_clients(
     db: AsyncSession,
     min_description: int | None = None,
     matching_words: list[str] | None = None,
+    created_by: int | None = None,
 ) -> int:
     """
     Deactivate active career clients that fail the given criteria.
@@ -408,8 +432,10 @@ async def scan_and_deactivate_career_clients(
         update(CareerClient)
         .where(CareerClient.is_active.is_(True))
         .where(or_(*conditions))
-        .values(is_active=False)
     )
+    if created_by is not None:
+        stmt = stmt.where(CareerClient.created_by == created_by)
+    stmt = stmt.values(is_active=False)
     result = await db.execute(stmt)
     return result.rowcount or 0
 
@@ -422,6 +448,7 @@ async def get_or_create_career_client(
     emails: list[str],
     detail: str | None,
     size: str | None,
+    created_by: int,
 ) -> CareerClient | None:
     """
     Get existing career client by link or name, or create new one if not found.
@@ -429,9 +456,9 @@ async def get_or_create_career_client(
     """
     client = None
     if link and str(link).strip():
-        client = await get_career_client_by_link(db, link)
+        client = await get_career_client_by_link(db, link, created_by=created_by)
     if client is None and name and str(name).strip():
-        client = await get_career_client_by_name(db, name)
+        client = await get_career_client_by_name(db, name, created_by=created_by)
     if client is not None:
         return client
     has_name = name and str(name).strip()
@@ -446,6 +473,7 @@ async def get_or_create_career_client(
         "link": link.strip() if link else None,
         "size": size.strip() if size else None,
         "meta_data": {},
+        "created_by": created_by,
     }
     return await create_career_client(db, client_data)
 
@@ -576,12 +604,15 @@ def _email_rows_order_clause(
     return "client_id DESC, client_email ASC"
 
 
-async def count_career_client_email_rows(db: AsyncSession) -> int:
+async def count_career_client_email_rows(
+    db: AsyncSession, created_by: int | None = None
+) -> int:
     """
     Count total flattened career client email rows (one per stored email).
     """
+    owner_clause = " AND c.created_by = :created_by " if created_by is not None else ""
     stmt = text(
-        """
+        f"""
         WITH expanded AS (
             SELECT
                 c.id AS client_id,
@@ -591,10 +622,13 @@ async def count_career_client_email_rows(db: AsyncSession) -> int:
                 COALESCE(c.emails::jsonb, '[]'::jsonb)
             ) AS e(elem)
             WHERE c.is_active = true
+          {owner_clause}
         )
         SELECT COUNT(*) AS n FROM expanded
         """
     )
+    if created_by is not None:
+        stmt = stmt.bindparams(created_by=created_by)
     result = await db.execute(stmt)
     row = result.first()
     return int(row[0]) if row and row[0] is not None else 0
@@ -606,11 +640,13 @@ async def list_career_client_email_rows_paginated(
     limit: int,
     email_count_sort: str | None,
     created_at_sort: str | None,
+    created_by: int | None = None,
 ) -> list[dict]:
     """
     List flattened client emails with send counts from email_logs, paginated.
     """
     order_sql = _email_rows_order_clause(email_count_sort, created_at_sort)
+    owner_clause = " AND c.created_by = :created_by " if created_by is not None else ""
     stmt = text(
         f"""
         WITH expanded AS (
@@ -626,6 +662,7 @@ async def list_career_client_email_rows_paginated(
                 COALESCE(c.emails::jsonb, '[]'::jsonb)
             ) AS e(elem)
             WHERE c.is_active = true
+          {owner_clause}
         ),
         counts AS (
             SELECT LOWER(TRIM(to_email)) AS norm_email, COUNT(*)::int AS email_count
@@ -657,7 +694,11 @@ async def list_career_client_email_rows_paginated(
         ORDER BY {order_sql}
         OFFSET :skip LIMIT :limit
         """
-    ).bindparams(skip=skip, limit=limit)
+    )
+    if created_by is not None:
+        stmt = stmt.bindparams(skip=skip, limit=limit, created_by=created_by)
+    else:
+        stmt = stmt.bindparams(skip=skip, limit=limit)
     result = await db.execute(stmt)
     rows = result.mappings().all()
     return [dict(r) for r in rows]

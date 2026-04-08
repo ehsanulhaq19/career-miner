@@ -187,7 +187,7 @@ async def create_job_application_flow(
     passing to LLM, generating PDF resume, and persisting.
     """
     career_job = await get_career_job_by_id(db, career_job_id)
-    if career_job is None:
+    if career_job is None or career_job.created_by != user_id:
         raise NotFoundException(detail="Career job not found")
 
     resume = await get_resume_by_id(db, resume_id, user_id)
@@ -197,6 +197,8 @@ async def create_job_application_flow(
     career_client = None
     if career_job.career_client_id:
         career_client = await get_career_client_by_id(db, career_job.career_client_id)
+        if career_client is not None and career_client.created_by != user_id:
+            career_client = None
 
     job_application_data = json.dumps(
         career_job.parsed_data or {}, indent=2, default=str
@@ -278,6 +280,7 @@ async def create_job_application_flow(
         "application_name": application_name,
         "resume_id": resume_id,
         "user_id": user_id,
+        "created_by": user_id,
         "subject": subject,
         "cover_letter": cover_letter,
         "output_resume_path": output_resume_path,
@@ -362,6 +365,7 @@ async def create_live_job_application_flow(
             "size": _optional_str(cc_raw.get("size")),
             "meta_data": client_meta,
             "scrap_client_job_id": None,
+            "created_by": user_id,
         },
     )
 
@@ -381,6 +385,7 @@ async def create_live_job_application_flow(
             "career_client_id": client_row.id,
             "meta_data": job_meta,
             "parsed_data": parsed_job,
+            "created_by": user_id,
         },
     )
 
@@ -609,6 +614,7 @@ async def start_bulk_job_application(
     resume_id: int,
     career_job_ids: list[int],
     user_id: int,
+    workflow_execution_id: int | None = None,
 ) -> BulkJobApplicationResponse:
     """
     Create a bulk job application record and return it.
@@ -626,16 +632,16 @@ async def start_bulk_job_application(
         "career_job_ids": career_job_ids,
         "total": len(career_job_ids),
     }
-    bulk_job_application = await create_bulk_job_application(
-        db,
-        {
-            "name": name,
-            "user_id": user_id,
-            "resume_id": resume_id,
-            "status": BulkJobApplicationStatus.PENDING.value,
-            "meta_data": meta_data,
-        },
-    )
+    bulk_data: dict = {
+        "name": name,
+        "user_id": user_id,
+        "resume_id": resume_id,
+        "status": BulkJobApplicationStatus.PENDING.value,
+        "meta_data": meta_data,
+    }
+    if workflow_execution_id is not None:
+        bulk_data["workflow_execution_id"] = workflow_execution_id
+    bulk_job_application = await create_bulk_job_application(db, bulk_data)
     return BulkJobApplicationResponse.model_validate(bulk_job_application)
 
 
@@ -969,6 +975,7 @@ async def start_bulk_job_application_email_send(
     job_application_ids: list[int],
     user_id: int,
     min_similarity_score: float | None = None,
+    workflow_execution_id: int | None = None,
 ) -> dict:
     """
     Create a bulk job application email send record and return it.
@@ -1001,15 +1008,15 @@ async def start_bulk_job_application_email_send(
     if min_similarity_score is not None:
         meta_data["min_similarity_score"] = min_similarity_score
 
-    bulk = await create_bulk_job_application_email_send(
-        db,
-        {
-            "user_id": user_id,
-            "status": BulkJobApplicationEmailSendStatus.PENDING.value,
-            "min_similarity_score": min_similarity_score,
-            "meta_data": meta_data,
-        },
-    )
+    email_bulk_data: dict = {
+        "user_id": user_id,
+        "status": BulkJobApplicationEmailSendStatus.PENDING.value,
+        "min_similarity_score": min_similarity_score,
+        "meta_data": meta_data,
+    }
+    if workflow_execution_id is not None:
+        email_bulk_data["workflow_execution_id"] = workflow_execution_id
+    bulk = await create_bulk_job_application_email_send(db, email_bulk_data)
     return {
         "id": bulk.id,
         "status": bulk.status,

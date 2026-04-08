@@ -67,7 +67,9 @@ async def _process_eligible_sites(db) -> None:
     job_sites = await get_active_job_sites_for_scraping(db)
     scraper = ScraperService()
     for job_site in job_sites:
-        active_jobs = await get_active_scrap_jobs_for_site(db, job_site.id)
+        active_jobs = await get_active_scrap_jobs_for_site(
+            db, job_site.id, created_by=job_site.created_by
+        )
         if active_jobs:
             logger.info(
                 "Skipping site %s — active scrap job already exists",
@@ -81,6 +83,7 @@ async def _process_eligible_sites(db) -> None:
                 "name": f"job_{int(datetime.now(timezone.utc).timestamp())}",
                 "job_site_id": job_site.id,
                 "status": ScrapJobStatus.PENDING.value,
+                "created_by": job_site.created_by,
             },
         )
         logger.info(

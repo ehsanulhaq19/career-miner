@@ -162,4 +162,12 @@ export const workflowService = {
     );
     return data;
   },
+
+  async resumeWorkflowExecution(executionId: number) {
+    const { data } = await api.post<{
+      status: string;
+      execution_id: number;
+    }>(`/workflows/executions/${executionId}/resume`);
+    return data;
+  },
 };

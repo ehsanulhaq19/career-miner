@@ -364,8 +364,24 @@ async def _run_client_site_scraper(
                 details="Background client site scraper started",
                 meta_data={"client_site_id": client_site_id},
             )
+            job_owner = await get_scrap_client_job_by_id(db, scrap_client_job_id)
+            if job_owner is None:
+                return
+            owner_id = job_owner.created_by
             client_site = await get_client_site_by_id(db, client_site_id)
             if client_site is None:
+                await update_scrap_client_job_status(
+                    db, scrap_client_job_id, ScrapClientJobStatus.ERROR
+                )
+                await db.commit()
+                await _create_log_and_broadcast(
+                    scrap_client_job_id,
+                    "job_error",
+                    status="error",
+                    details="Client site not found",
+                )
+                return
+            if client_site.created_by != owner_id:
                 await update_scrap_client_job_status(
                     db, scrap_client_job_id, ScrapClientJobStatus.ERROR
                 )
@@ -390,6 +406,7 @@ async def _run_client_site_scraper(
             saved_count = await scrape_clients_from_url(
                 db,
                 client_site.url,
+                owner_id,
                 use_discovery_when_no_email=True,
                 max_pages=5,
                 scrap_client_job_id=scrap_client_job_id,
@@ -736,12 +753,13 @@ async def _run_client_email_scraper(
 async def start_scrap_client_job(
     db: AsyncSession,
     request: ScrapClientStartRequest,
+    user_id: int,
 ) -> ScrapClientJobResponse:
     """
     Create and start a new scrap client job for email fetching.
     Requires non-empty client_ids. Assigns scrap_client_job_id on those career clients before the worker runs.
     """
-    active = await get_active_scrap_client_jobs(db)
+    active = await get_active_scrap_client_jobs(db, created_by=user_id)
     if active:
         raise BadRequestException(
             detail="An active scrap client job already exists"
@@ -755,9 +773,12 @@ async def start_scrap_client_job(
             "name": f"client_{int(datetime.now(timezone.utc).timestamp())}",
             "status": ScrapClientJobStatus.PENDING.value,
             "meta_data": meta_data,
+            "created_by": user_id,
         },
     )
-    await assign_scrap_client_job_to_career_clients(db, ids, scrap_job.id)
+    await assign_scrap_client_job_to_career_clients(
+        db, ids, scrap_job.id, created_by=user_id
+    )
     response = ScrapClientJobResponse.model_validate(scrap_job)
     await broadcast_scrap_client_status(
         response.model_dump(), ScrapClientJobStatus.PENDING.value
@@ -768,12 +789,13 @@ async def start_scrap_client_job(
 async def start_scrap_client_details_job(
     db: AsyncSession,
     request: ScrapClientDetailsStartRequest,
+    user_id: int,
 ) -> ScrapClientJobResponse:
     """
     Create and start a job that enriches company profile fields for the given career clients.
     Assigns scrap_client_job_id on those clients before the background worker runs.
     """
-    active = await get_active_scrap_client_jobs(db)
+    active = await get_active_scrap_client_jobs(db, created_by=user_id)
     if active:
         raise BadRequestException(
             detail="An active scrap client job already exists"
@@ -790,9 +812,12 @@ async def start_scrap_client_details_job(
             "name": f"client_details_{int(datetime.now(timezone.utc).timestamp())}",
             "status": ScrapClientJobStatus.PENDING.value,
             "meta_data": meta_data,
+            "created_by": user_id,
         },
     )
-    await assign_scrap_client_job_to_career_clients(db, ids, scrap_job.id)
+    await assign_scrap_client_job_to_career_clients(
+        db, ids, scrap_job.id, created_by=user_id
+    )
     response = ScrapClientJobResponse.model_validate(scrap_job)
     await broadcast_scrap_client_status(
         response.model_dump(), ScrapClientJobStatus.PENDING.value
@@ -1124,9 +1149,13 @@ async def _run_client_url_scraper(
             )
             if await is_stopped():
                 return
+            job_owner = await get_scrap_client_job_by_id(db, scrap_client_job_id)
+            if job_owner is None:
+                return
             saved_count = await scrape_clients_from_url(
                 db,
                 normalized_url,
+                job_owner.created_by,
                 use_discovery_when_no_email=True,
                 max_pages=5,
                 scrap_client_job_id=scrap_client_job_id,
@@ -1186,12 +1215,13 @@ async def _run_client_url_scraper(
 async def start_scrap_client_from_site(
     db: AsyncSession,
     client_site_id: int,
+    user_id: int,
 ) -> ScrapClientJobResponse:
     """
     Create and start a scrap client job that scrapes client data from a client site URL.
     Extracts companies from the site and saves to CareerClient, using discovery when email not found.
     """
-    active = await get_active_scrap_client_jobs(db)
+    active = await get_active_scrap_client_jobs(db, created_by=user_id)
     if active:
         raise BadRequestException(
             detail="An active scrap client job already exists"
@@ -1200,7 +1230,7 @@ async def start_scrap_client_from_site(
     from app.modules.client_site.crud import get_client_site_by_id
 
     client_site = await get_client_site_by_id(db, client_site_id)
-    if client_site is None:
+    if client_site is None or client_site.created_by != user_id:
         raise NotFoundException(detail="Client site not found")
 
     meta_data = {"client_site_id": client_site_id}
@@ -1211,6 +1241,7 @@ async def start_scrap_client_from_site(
             "status": ScrapClientJobStatus.PENDING.value,
             "client_site_id": client_site_id,
             "meta_data": meta_data,
+            "created_by": user_id,
         },
     )
     response = ScrapClientJobResponse.model_validate(scrap_job)
@@ -1223,6 +1254,7 @@ async def start_scrap_client_from_site(
 async def start_scrap_client_from_url(
     db: AsyncSession,
     url: str,
+    user_id: int,
 ) -> ScrapClientJobResponse:
     """
     Create and start a scrap client job that scrapes client data from an arbitrary URL.
@@ -1230,7 +1262,7 @@ async def start_scrap_client_from_url(
     """
     from app.modules.scrap_client.services.url_utils import normalize_url
 
-    active = await get_active_scrap_client_jobs(db)
+    active = await get_active_scrap_client_jobs(db, created_by=user_id)
     if active:
         raise BadRequestException(
             detail="An active scrap client job already exists"
@@ -1248,6 +1280,7 @@ async def start_scrap_client_from_url(
             "status": ScrapClientJobStatus.PENDING.value,
             "source_url": normalized_url,
             "meta_data": meta_data,
+            "created_by": user_id,
         },
     )
     response = ScrapClientJobResponse.model_validate(scrap_job)
@@ -1260,6 +1293,7 @@ async def start_scrap_client_from_url(
 async def start_test_scrap_client_from_site(
     db: AsyncSession,
     request: TestScrapClientSiteRequest,
+    user_id: int,
 ) -> ScrapClientJobResponse:
     """
     Create and start a test scrap client job from a client site with client_site_id on the job row.
@@ -1268,7 +1302,7 @@ async def start_test_scrap_client_from_site(
     from app.modules.client_site.crud import get_client_site_by_id
 
     client_site = await get_client_site_by_id(db, request.client_site_id)
-    if client_site is None:
+    if client_site is None or client_site.created_by != user_id:
         raise NotFoundException(detail="Client site not found")
 
     meta_data = {
@@ -1282,6 +1316,7 @@ async def start_test_scrap_client_from_site(
             "status": ScrapClientJobStatus.PENDING.value,
             "client_site_id": request.client_site_id,
             "meta_data": meta_data,
+            "created_by": user_id,
         },
     )
     response = ScrapClientJobResponse.model_validate(scrap_job)
@@ -1294,6 +1329,7 @@ async def start_test_scrap_client_from_site(
 async def start_test_scrap_client_job(
     db: AsyncSession,
     request: TestScrapClientRequest,
+    user_id: int,
 ) -> ScrapClientJobResponse:
     """
     Create and start a test scrap client job with optional source_url on the job row.
@@ -1322,10 +1358,11 @@ async def start_test_scrap_client_job(
     }
     if normalized_test_url:
         create_payload["source_url"] = normalized_test_url
+    create_payload["created_by"] = user_id
     scrap_job = await create_scrap_client_job(db, create_payload)
     if request.client_ids:
         await assign_scrap_client_job_to_career_clients(
-            db, request.client_ids, scrap_job.id
+            db, request.client_ids, scrap_job.id, created_by=user_id
         )
     response = ScrapClientJobResponse.model_validate(scrap_job)
     await broadcast_scrap_client_status(
@@ -1335,11 +1372,11 @@ async def start_test_scrap_client_job(
 
 
 async def stop_scrap_client_job(
-    db: AsyncSession, scrap_client_job_id: int
+    db: AsyncSession, scrap_client_job_id: int, user_id: int
 ) -> ScrapClientJobResponse:
     """Stop a scrap client job that is pending or in progress."""
     scrap_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
-    if scrap_job is None:
+    if scrap_job is None or scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap client job not found")
     if scrap_job.status not in (
         ScrapClientJobStatus.PENDING.value,
@@ -1360,11 +1397,11 @@ async def stop_scrap_client_job(
 
 
 async def resume_scrap_client_job(
-    db: AsyncSession, scrap_client_job_id: int
+    db: AsyncSession, scrap_client_job_id: int, user_id: int
 ) -> ScrapClientJobResponse:
     """Resume a stopped scrap client job."""
     scrap_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
-    if scrap_job is None:
+    if scrap_job is None or scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap client job not found")
     if scrap_job.status != ScrapClientJobStatus.STOPPED.value:
         raise BadRequestException(
@@ -1386,10 +1423,15 @@ async def list_scrap_client_jobs(
     skip: int = 0,
     limit: int = 100,
     status: str | None = None,
+    user_id: int | None = None,
 ) -> ScrapClientJobListResponse:
     """Return a paginated list of scrap client jobs."""
     items, total = await get_scrap_client_jobs(
-        db, skip=skip, limit=limit, status=status,
+        db,
+        skip=skip,
+        limit=limit,
+        status=status,
+        created_by=user_id,
     )
     return ScrapClientJobListResponse(
         items=[ScrapClientJobResponse.model_validate(item) for item in items],
@@ -1398,11 +1440,13 @@ async def list_scrap_client_jobs(
 
 
 async def get_scrap_client_job(
-    db: AsyncSession, scrap_client_job_id: int
+    db: AsyncSession, scrap_client_job_id: int, user_id: int | None = None
 ) -> ScrapClientJobResponse:
     """Return a single scrap client job or raise NotFoundException."""
     scrap_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
     if scrap_job is None:
+        raise NotFoundException(detail="Scrap client job not found")
+    if user_id is not None and scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap client job not found")
     return ScrapClientJobResponse.model_validate(scrap_job)
 
@@ -1410,10 +1454,13 @@ async def get_scrap_client_job(
 async def get_scrap_client_job_logs(
     db: AsyncSession,
     scrap_client_job_id: int,
+    user_id: int | None = None,
 ) -> ScrapClientLogListResponse:
     """Return all logs for a scrap client job."""
     scrap_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
     if scrap_job is None:
+        raise NotFoundException(detail="Scrap client job not found")
+    if user_id is not None and scrap_job.created_by != user_id:
         raise NotFoundException(detail="Scrap client job not found")
     logs = await get_scrap_client_job_logs_by_job_id(db, scrap_client_job_id)
     return ScrapClientLogListResponse(
@@ -1423,12 +1470,14 @@ async def get_scrap_client_job_logs(
 
 async def get_scrap_client_status(
     db: AsyncSession,
+    user_id: int,
 ) -> ScrapClientStatusResponse:
     """Return status summary: pending, processing, completed, failed."""
     from app.modules.scrap_client.models import ScrapClientJob
 
     result = await db.execute(
         select(ScrapClientJob.status, func.count(ScrapClientJob.id))
+        .where(ScrapClientJob.created_by == user_id)
         .group_by(ScrapClientJob.status)
     )
     rows = result.all()
@@ -1448,10 +1497,13 @@ async def get_scrap_client_status(
 async def list_scrappers_for_scrap_client_job_service(
     db: AsyncSession,
     scrap_client_job_id: int,
+    user_id: int | None = None,
 ) -> ScrapperListResponse:
     """Return all scrapper HTML artifacts linked to a scrap client job."""
     client_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
     if client_job is None:
+        raise NotFoundException(detail="Scrap client job not found")
+    if user_id is not None and client_job.created_by != user_id:
         raise NotFoundException(detail="Scrap client job not found")
     rows = await list_scrappers_for_scrap_client_job(db, scrap_client_job_id)
     return ScrapperListResponse(
@@ -1463,10 +1515,13 @@ async def get_scrapper_html_for_scrap_client_job(
     db: AsyncSession,
     scrap_client_job_id: int,
     scrapper_id: int,
+    user_id: int | None = None,
 ) -> ScrapperHtmlPreviewResponse:
     """Load stored HTML for a scrapper row that belongs to the given scrap client job."""
     client_job = await get_scrap_client_job_by_id(db, scrap_client_job_id)
     if client_job is None:
+        raise NotFoundException(detail="Scrap client job not found")
+    if user_id is not None and client_job.created_by != user_id:
         raise NotFoundException(detail="Scrap client job not found")
     if not await scrap_client_job_owns_scrapper(
         db, scrap_client_job_id, scrapper_id

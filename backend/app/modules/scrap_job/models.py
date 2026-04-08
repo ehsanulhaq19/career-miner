@@ -59,6 +59,10 @@ class ScrapJob(Base):
         nullable=False,
     )
     meta_data = Column(JSON, default=dict, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    workflow_execution_id = Column(
+        Integer, ForeignKey("workflow_executions.id"), nullable=True
+    )
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -23,6 +23,7 @@ from app.modules.workflow.service import (
     get_workflow_detail,
     list_executions_svc,
     list_workflows_svc,
+    resume_workflow_execution_svc,
     trigger_workflow_run_svc,
     update_workflow_svc,
     update_workflow_task_svc,
@@ -132,6 +133,18 @@ async def get_workflow_execution_endpoint(
 ) -> WorkflowExecutionDetailResponse:
     """Return one execution with jobs and logs."""
     return await get_execution_detail_svc(db, execution_id, current_user.id)
+
+
+@router.post("/executions/{execution_id}/resume")
+async def resume_workflow_execution_endpoint(
+    execution_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Continue an in-progress run from its current step (re-runs in-progress work)."""
+    return await resume_workflow_execution_svc(
+        db, execution_id, current_user.id
+    )
 
 
 @router.get("/{workflow_id}", response_model=WorkflowDetailResponse)

@@ -306,6 +306,7 @@ class ScraperService:
                             title=job_data["title"],
                             job_site_id=job_site.id,
                             links=job_data.get("links", []),
+                            created_by=scrap_job.created_by,
                         )
                         if exists:
                             continue
@@ -411,6 +412,7 @@ class ScraperService:
                             emails=self._parse_emails(parsed_data.get("company_emails")),
                             detail=job_data.get("description"),
                             size=parsed_data.get("company_size"),
+                            created_by=scrap_job.created_by,
                         )
 
                         if not career_client:
@@ -424,6 +426,7 @@ class ScraperService:
                             "scrap_job_id": scrap_job.id,
                             "parsed_data": parsed_data,
                             "meta_data": {},
+                            "created_by": scrap_job.created_by,
                         }
                         if career_client:
                             career_job_data["career_client_id"] = career_client.id
@@ -433,6 +436,7 @@ class ScraperService:
                             title=job_data["title"],
                             job_site_id=job_site.id,
                             career_client_id=career_client.id,
+                            created_by=scrap_job.created_by,
                         )
                         if exists:
                             continue

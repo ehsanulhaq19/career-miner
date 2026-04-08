@@ -20,6 +20,7 @@ import {
   fetchWorkflows,
   patchWorkflowTask,
   removeWorkflowTask,
+  resumeWorkflowExecution,
   runWorkflow,
   updateWorkflow,
 } from "@/store/slices/workflowSlice";
@@ -97,6 +98,9 @@ export default function WorkflowPage() {
     null
   );
   const [taskAddError, setTaskAddError] = useState<string | null>(null);
+  const [resumeBusyExecutionId, setResumeBusyExecutionId] = useState<
+    number | null
+  >(null);
 
   useEffect(() => {
     if (activeTab === "workflows") {
@@ -408,6 +412,7 @@ export default function WorkflowPage() {
                     <th className="text-left p-3">Workflow</th>
                     <th className="text-left p-3">Status</th>
                     <th className="text-left p-3">Started</th>
+                    <th className="text-left p-3 w-32">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -425,6 +430,32 @@ export default function WorkflowPage() {
                       <td className="p-3">{e.workflow_id}</td>
                       <td className="p-3">{e.status}</td>
                       <td className="p-3 text-xs">{e.started_at}</td>
+                      <td className="p-3">
+                        {e.status === "in_progress" ? (
+                          <button
+                            type="button"
+                            className="text-xs px-2 py-1 rounded border border-primary-500 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-950 disabled:opacity-50"
+                            disabled={resumeBusyExecutionId === e.id}
+                            onClick={async () => {
+                              setResumeBusyExecutionId(e.id);
+                              try {
+                                await dispatch(
+                                  resumeWorkflowExecution(e.id)
+                                ).unwrap();
+                                await dispatch(fetchWorkflowExecutions());
+                              } finally {
+                                setResumeBusyExecutionId(null);
+                              }
+                            }}
+                          >
+                            {resumeBusyExecutionId === e.id
+                              ? "Resuming…"
+                              : "Resume"}
+                          </button>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

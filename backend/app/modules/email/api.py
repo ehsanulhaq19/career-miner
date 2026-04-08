@@ -90,6 +90,7 @@ async def list_job_email_logs_endpoint(
         created_date_from=created_date_from,
         created_date_to=created_date_to,
         search=search,
+        user_id=current_user.id,
     )
 
 

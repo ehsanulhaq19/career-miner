@@ -228,6 +228,20 @@ export const runWorkflow = createAsyncThunk(
   }
 );
 
+export const resumeWorkflowExecution = createAsyncThunk(
+  "workflow/resumeExecution",
+  async (executionId: number, { rejectWithValue }) => {
+    try {
+      return await workflowService.resumeWorkflowExecution(executionId);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      return rejectWithValue(
+        err.response?.data?.detail || "Failed to resume workflow execution"
+      );
+    }
+  }
+);
+
 const workflowSlice = createSlice({
   name: "workflow",
   initialState,
@@ -348,6 +362,9 @@ const workflowSlice = createSlice({
         state.error = action.payload as string;
       })
       .addCase(runWorkflow.rejected, (state, action) => {
+        state.error = action.payload as string;
+      })
+      .addCase(resumeWorkflowExecution.rejected, (state, action) => {
         state.error = action.payload as string;
       });
   },

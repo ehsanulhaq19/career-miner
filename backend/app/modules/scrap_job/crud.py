@@ -13,10 +13,15 @@ async def get_scrap_jobs(
     limit: int = 100,
     job_site_id: int | None = None,
     status: str | None = None,
+    created_by: int | None = None,
 ) -> tuple[list[ScrapJob], int]:
     """Retrieve a paginated list of scrap jobs with optional filters."""
     query = select(ScrapJob)
     count_query = select(func.count(ScrapJob.id))
+
+    if created_by is not None:
+        query = query.where(ScrapJob.created_by == created_by)
+        count_query = count_query.where(ScrapJob.created_by == created_by)
 
     if job_site_id is not None:
         query = query.where(ScrapJob.job_site_id == job_site_id)
@@ -107,16 +112,18 @@ async def update_scrap_job_meta_data(
 async def get_active_scrap_jobs_for_site(
     db: AsyncSession,
     job_site_id: int,
+    created_by: int | None = None,
 ) -> list[ScrapJob]:
     """Return scrap jobs with status pending or in_progress for a given site."""
-    result = await db.execute(
-        select(ScrapJob).where(
-            ScrapJob.job_site_id == job_site_id,
-            ScrapJob.status.in_(
-                [ScrapJobStatus.PENDING.value, ScrapJobStatus.IN_PROGRESS.value]
-            ),
-        )
+    q = select(ScrapJob).where(
+        ScrapJob.job_site_id == job_site_id,
+        ScrapJob.status.in_(
+            [ScrapJobStatus.PENDING.value, ScrapJobStatus.IN_PROGRESS.value]
+        ),
     )
+    if created_by is not None:
+        q = q.where(ScrapJob.created_by == created_by)
+    result = await db.execute(q)
     return list(result.scalars().all())
 
 

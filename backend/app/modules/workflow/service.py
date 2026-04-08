@@ -2,6 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, NotFoundException
@@ -13,15 +14,18 @@ from app.modules.career_job.crud import (
 from app.modules.job_application.crud import (
     get_job_application_ids_for_user_by_career_jobs,
 )
+from app.modules.client_site.crud import get_client_site_by_id
 from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.scrap_job.crud import create_scrap_job
-from app.modules.scrap_job.models import ScrapJobStatus
+from app.modules.scrap_job.models import ScrapJob, ScrapJobStatus
 from app.modules.scraper.service import ScraperService
 from app.modules.workflow import crud as workflow_crud
 from app.modules.workflow.models import (
     LinkedTaskModelName,
     WorkflowExecutionStatus,
+    WorkflowJob,
     WorkflowJobStatus,
+    WorkflowTask,
 )
 from app.modules.workflow.schemas import (
     WorkflowCreateRequest,
@@ -143,51 +147,98 @@ async def _dispatch_scrap_job(
     execution_id: int,
 ) -> dict:
     """Create a scrap job and run the site scraper to completion."""
-    _ = user_id
-    async with async_session() as db:
-        site = await get_job_site_by_id(db, data["job_site_id"])
-        if site is None:
-            raise NotFoundException(detail="Job site not found")
-        ts = int(datetime.now(timezone.utc).timestamp())
-        scrap_job = await create_scrap_job(
-            db,
-            {
-                "name": data.get("name") or f"wf_exec_{execution_id}_{ts}",
-                "job_site_id": site.id,
-                "status": ScrapJobStatus.PENDING.value,
-                "meta_data": {
-                    **(data.get("meta_data") or {}),
-                    "workflow_execution_id": execution_id,
-                },
-            },
-        )
-        await db.commit()
-        sid = scrap_job.id
     from app.modules.scrap_job.crud import get_scrap_job_by_id
 
     async with async_session() as db:
         site = await get_job_site_by_id(db, data["job_site_id"])
-        scrap_job_row = await get_scrap_job_by_id(db, sid)
-        if site is None or scrap_job_row is None:
-            raise NotFoundException(detail="Scrap job or site missing")
-        scraper = ScraperService()
-        await scraper.scrape_job_site(
-            db,
-            site,
-            scrap_job_row,
-            categories=data.get("categories"),
-            max_pages_per_scrap=data.get("max_pages_per_scrap"),
-            process_with_llm=data.get("process_with_llm", True),
-            load_more_on_scroll=data.get("load_more_on_scroll", False),
-            max_scroll=data.get("max_scroll", 10),
-            depth_levels=data.get("depth_levels", 0),
+        if site is None or site.created_by != user_id:
+            raise NotFoundException(detail="Job site not found")
+
+        reuse = await db.execute(
+            select(ScrapJob)
+            .where(
+                ScrapJob.workflow_execution_id == execution_id,
+                ScrapJob.job_site_id == site.id,
+                ScrapJob.created_by == user_id,
+            )
+            .order_by(ScrapJob.id.desc())
+            .limit(1)
         )
+        existing = reuse.scalars().first()
+        if existing is not None and existing.status == ScrapJobStatus.COMPLETED.value:
+            sid = existing.id
+            await db.commit()
+            async with async_session() as db_cj:
+                cj_ids = await get_career_job_ids_by_scrap_job_id(
+                    db_cj, sid, created_by=user_id
+                )
+            cc_ids: list[int] = []
+            if cj_ids:
+                async with async_session() as db_cc:
+                    cc_ids = await get_career_client_ids_for_career_jobs(
+                        db_cc, cj_ids, created_by=user_id
+                    )
+            return {
+                "scrap_job_id": sid,
+                "career_job_ids": cj_ids,
+                "career_client_ids": cc_ids,
+            }
+
+        if existing is not None and existing.status in (
+            ScrapJobStatus.PENDING.value,
+            ScrapJobStatus.IN_PROGRESS.value,
+        ):
+            sid = existing.id
+        else:
+            ts = int(datetime.now(timezone.utc).timestamp())
+            scrap_job = await create_scrap_job(
+                db,
+                {
+                    "name": data.get("name") or f"wf_exec_{execution_id}_{ts}",
+                    "job_site_id": site.id,
+                    "created_by": user_id,
+                    "workflow_execution_id": execution_id,
+                    "status": ScrapJobStatus.PENDING.value,
+                    "meta_data": {
+                        **(data.get("meta_data") or {}),
+                        "workflow_execution_id": execution_id,
+                    },
+                },
+            )
+            sid = scrap_job.id
+        await db.commit()
+
     async with async_session() as db:
-        cj_ids = await get_career_job_ids_by_scrap_job_id(db, sid)
+        site = await get_job_site_by_id(db, data["job_site_id"])
+        scrap_job_row = await get_scrap_job_by_id(db, sid)
+        if (
+            site is None
+            or scrap_job_row is None
+            or site.created_by != user_id
+            or scrap_job_row.created_by != user_id
+        ):
+            raise NotFoundException(detail="Scrap job or site missing")
+        if scrap_job_row.status != ScrapJobStatus.COMPLETED.value:
+            scraper = ScraperService()
+            await scraper.scrape_job_site(
+                db,
+                site,
+                scrap_job_row,
+                categories=data.get("categories"),
+                max_pages_per_scrap=data.get("max_pages_per_scrap"),
+                process_with_llm=data.get("process_with_llm", True),
+                load_more_on_scroll=data.get("load_more_on_scroll", False),
+                max_scroll=data.get("max_scroll", 10),
+                depth_levels=data.get("depth_levels", 0),
+            )
+    async with async_session() as db:
+        cj_ids = await get_career_job_ids_by_scrap_job_id(db, sid, created_by=user_id)
     cc_ids = []
     if cj_ids:
         async with async_session() as db:
-            cc_ids = await get_career_client_ids_for_career_jobs(db, cj_ids)
+            cc_ids = await get_career_client_ids_for_career_jobs(
+                db, cj_ids, created_by=user_id
+            )
     return {
         "scrap_job_id": sid,
         "career_job_ids": cj_ids,
@@ -202,7 +253,6 @@ async def _dispatch_scrap_client_job(
     context: dict,
 ) -> dict:
     """Create a scrap client job and await the matching runner."""
-    _ = user_id
     mode = data.get("mode") or "site"
     from app.modules.scrap_client.crud import create_scrap_client_job
     from app.modules.scrap_client.models import ScrapClientJobStatus
@@ -219,11 +269,16 @@ async def _dispatch_scrap_client_job(
     if mode == "site":
         cs_id = data["client_site_id"]
         async with async_session() as db:
+            cs = await get_client_site_by_id(db, cs_id)
+            if cs is None or cs.created_by != user_id:
+                raise NotFoundException(detail="Client site not found")
             sj = await create_scrap_client_job(
                 db,
                 {
                     "name": data.get("name") or f"wf_sc_site_{execution_id}_{ts}",
                     "client_site_id": cs_id,
+                    "created_by": user_id,
+                    "workflow_execution_id": execution_id,
                     "status": ScrapClientJobStatus.PENDING.value,
                     "meta_data": {**meta, "client_site_id": cs_id},
                 },
@@ -246,6 +301,8 @@ async def _dispatch_scrap_client_job(
                 {
                     "name": data.get("name") or f"wf_sc_url_{execution_id}_{ts}",
                     "source_url": nu,
+                    "created_by": user_id,
+                    "workflow_execution_id": execution_id,
                     "status": ScrapClientJobStatus.PENDING.value,
                     "meta_data": {**meta, "url": nu},
                 },
@@ -261,7 +318,9 @@ async def _dispatch_scrap_client_job(
             cj = context.get("career_job_ids") or []
             if cj:
                 async with async_session() as db:
-                    client_ids = await get_career_client_ids_for_career_jobs(db, cj)
+                    client_ids = await get_career_client_ids_for_career_jobs(
+                        db, cj, created_by=user_id
+                    )
         only_without = bool(data.get("only_clients_without_emails", False))
         url = data.get("url")
         async with async_session() as db:
@@ -269,6 +328,8 @@ async def _dispatch_scrap_client_job(
                 db,
                 {
                     "name": data.get("name") or f"wf_sc_em_{execution_id}_{ts}",
+                    "created_by": user_id,
+                    "workflow_execution_id": execution_id,
                     "status": ScrapClientJobStatus.PENDING.value,
                     "meta_data": {
                         **meta,
@@ -367,6 +428,7 @@ async def _dispatch_bulk_email(
             ja_ids,
             user_id,
             min_similarity_score=min_similarity,
+            workflow_execution_id=execution_id,
         )
         bulk_id = out["id"]
         filtered_ja_ids = out["job_application_ids"]
@@ -396,59 +458,106 @@ async def dispatch_workflow_task(
     raise BadRequestException(detail=f"Unsupported linked_task_model: {model_name}")
 
 
-async def execute_workflow_run(workflow_id: int) -> None:
-    """Execute all active tasks for a workflow in priority order."""
+async def _finalize_workflow_execution_completed(ex_id: int, user_id: int) -> None:
     async with async_session() as db:
-        wf = await workflow_crud.get_workflow_by_id(db, workflow_id)
-        if wf is None or not wf.is_active:
-            return
-        user_id = wf.user_id
-        ex = await workflow_crud.create_workflow_execution(
+        await workflow_crud.update_workflow_execution(
             db,
+            ex_id,
             {
-                "workflow_id": wf.id,
-                "user_id": user_id,
-                "status": WorkflowExecutionStatus.IN_PROGRESS.value,
-                "meta_data": {"context": {}},
+                "status": WorkflowExecutionStatus.COMPLETED.value,
+                "completed_at": datetime.now(timezone.utc).replace(tzinfo=None),
             },
         )
-        await workflow_crud.touch_workflow_last_execution(db, wf.id)
-        await db.flush()
-        ex_id = ex.id
         await db.commit()
+    await broadcast_workflow_event(
+        user_id,
+        {"event": "workflow_execution_completed", "workflow_execution_id": ex_id},
+    )
 
-    tasks = []
-    async with async_session() as db:
-        tasks = await workflow_crud.list_workflow_tasks(db, workflow_id)
-    active = [t for t in tasks if t.is_active]
-    active.sort(key=lambda x: (-x.priority, x.id))
-    context: dict = {}
 
-    for task in active:
+def _resolve_resume_start(
+    active: list[WorkflowTask],
+    jobs: list[WorkflowJob],
+) -> tuple[int | None, int | None, str | None]:
+    """
+    Returns (start_task_index, reuse_workflow_job_id, reason).
+    reason ``already_complete`` means caller should finalize the execution only.
+    """
+    jobs_sorted = sorted(jobs, key=lambda j: j.id)
+    nj = len(jobs_sorted)
+    na = len(active)
+    if na == 0:
+        return None, None, "no_tasks"
+    for i in range(na):
+        if i >= nj:
+            return i, None, None
+        job = jobs_sorted[i]
+        if job.workflow_task_id != active[i].id:
+            return None, None, "job_task_mismatch"
+        if job.status == WorkflowJobStatus.ERROR.value:
+            return None, None, "has_error"
+        if job.status in (
+            WorkflowJobStatus.IN_PROGRESS.value,
+            WorkflowJobStatus.PENDING.value,
+        ):
+            return i, job.id, None
+    if nj >= na and all(
+        jobs_sorted[k].workflow_task_id == active[k].id
+        and jobs_sorted[k].status
+        in (
+            WorkflowJobStatus.COMPLETED.value,
+            WorkflowJobStatus.TERMINATED.value,
+        )
+        for k in range(na)
+    ):
+        return None, None, "already_complete"
+    if nj < na:
+        return nj, None, None
+    return None, None, "unknown"
+
+
+async def _execute_workflow_tasks_loop(
+    workflow_id: int,
+    ex_id: int,
+    user_id: int,
+    active: list[WorkflowTask],
+    start_at_index: int,
+    resume_workflow_job_id: int | None,
+    context: dict,
+) -> None:
+    """Run workflow tasks from start_at_index; optionally reuse an in-progress job row."""
+    for task_index in range(start_at_index, len(active)):
+        task = active[task_index]
         wj_id = None
         try:
-            async with async_session() as db:
-                wj = await workflow_crud.create_workflow_job(
-                    db,
+            reuse_row = (
+                task_index == start_at_index and resume_workflow_job_id is not None
+            )
+            if reuse_row:
+                wj_id = resume_workflow_job_id
+            else:
+                async with async_session() as db:
+                    wj = await workflow_crud.create_workflow_job(
+                        db,
+                        {
+                            "workflow_execution_id": ex_id,
+                            "workflow_task_id": task.id,
+                            "status": WorkflowJobStatus.IN_PROGRESS.value,
+                            "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                        },
+                    )
+                    await db.flush()
+                    wj_id = wj.id
+                    await db.commit()
+                await broadcast_workflow_event(
+                    user_id,
                     {
+                        "event": "workflow_job_started",
                         "workflow_execution_id": ex_id,
+                        "workflow_job_id": wj_id,
                         "workflow_task_id": task.id,
-                        "status": WorkflowJobStatus.IN_PROGRESS.value,
-                        "started_at": datetime.now(timezone.utc).replace(tzinfo=None),
                     },
                 )
-                await db.flush()
-                wj_id = wj.id
-                await db.commit()
-            await broadcast_workflow_event(
-                user_id,
-                {
-                    "event": "workflow_job_started",
-                    "workflow_execution_id": ex_id,
-                    "workflow_job_id": wj_id,
-                    "workflow_task_id": task.id,
-                },
-            )
             delta = await dispatch_workflow_task(
                 task.linked_task_model,
                 dict(task.linked_task_model_data or {}),
@@ -506,7 +615,11 @@ async def execute_workflow_run(workflow_id: int) -> None:
                 },
             )
         except Exception as e:
-            logger.exception("Workflow task error workflow_id=%s task_id=%s", workflow_id, task.id)
+            logger.exception(
+                "Workflow task error workflow_id=%s task_id=%s",
+                workflow_id,
+                task.id,
+            )
             async with async_session() as db:
                 if wj_id:
                     await workflow_crud.update_workflow_job(
@@ -539,19 +652,83 @@ async def execute_workflow_run(workflow_id: int) -> None:
                 },
             )
 
+    await _finalize_workflow_execution_completed(ex_id, user_id)
+
+
+async def continue_workflow_execution(execution_id: int) -> None:
+    """Resume an in-progress execution from the first incomplete or in-progress step."""
     async with async_session() as db:
-        await workflow_crud.update_workflow_execution(
+        ex = await workflow_crud.get_workflow_execution_by_id(db, execution_id)
+        if ex is None:
+            logger.warning("continue_workflow_execution: missing execution %s", execution_id)
+            return
+        if ex.status != WorkflowExecutionStatus.IN_PROGRESS.value:
+            return
+        user_id = ex.user_id
+        workflow_id = ex.workflow_id
+        context = dict((ex.meta_data or {}).get("context") or {})
+        jobs = await workflow_crud.list_workflow_jobs_for_execution(db, execution_id)
+
+    tasks: list[WorkflowTask] = []
+    async with async_session() as db:
+        tasks = await workflow_crud.list_workflow_tasks(db, workflow_id)
+    active = [t for t in tasks if t.is_active]
+    active.sort(key=lambda x: (-x.priority, x.id))
+    start_idx, reuse_id, reason = _resolve_resume_start(active, jobs)
+
+    if reason == "already_complete":
+        await _finalize_workflow_execution_completed(execution_id, user_id)
+        return
+    if reason in ("has_error", "job_task_mismatch", "no_tasks", "unknown"):
+        logger.warning(
+            "continue_workflow_execution: cannot proceed execution_id=%s reason=%s",
+            execution_id,
+            reason,
+        )
+        return
+    if start_idx is None:
+        return
+
+    await _execute_workflow_tasks_loop(
+        workflow_id,
+        execution_id,
+        user_id,
+        active,
+        start_idx,
+        reuse_id,
+        context,
+    )
+
+
+async def execute_workflow_run(workflow_id: int) -> None:
+    """Execute all active tasks for a workflow in priority order."""
+    async with async_session() as db:
+        wf = await workflow_crud.get_workflow_by_id(db, workflow_id)
+        if wf is None or not wf.is_active:
+            return
+        user_id = wf.user_id
+        ex = await workflow_crud.create_workflow_execution(
             db,
-            ex_id,
             {
-                "status": WorkflowExecutionStatus.COMPLETED.value,
-                "completed_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                "workflow_id": wf.id,
+                "user_id": user_id,
+                "status": WorkflowExecutionStatus.IN_PROGRESS.value,
+                "meta_data": {"context": {}},
             },
         )
+        await workflow_crud.touch_workflow_last_execution(db, wf.id)
+        await db.flush()
+        ex_id = ex.id
         await db.commit()
-    await broadcast_workflow_event(
-        user_id,
-        {"event": "workflow_execution_completed", "workflow_execution_id": ex_id},
+
+    tasks = []
+    async with async_session() as db:
+        tasks = await workflow_crud.list_workflow_tasks(db, workflow_id)
+    active = [t for t in tasks if t.is_active]
+    active.sort(key=lambda x: (-x.priority, x.id))
+    context: dict = {}
+    await _execute_workflow_tasks_loop(
+        workflow_id, ex_id, user_id, active, 0, None, context
     )
 
 
@@ -761,3 +938,35 @@ async def trigger_workflow_run_svc(
         raise NotFoundException(detail="Workflow not found")
     asyncio.create_task(execute_workflow_run(workflow_id))
     return {"status": "started", "workflow_id": workflow_id}
+
+
+async def resume_workflow_execution_svc(
+    db: AsyncSession,
+    execution_id: int,
+    user_id: int,
+) -> dict:
+    """Re-enter an in-progress execution from its current step (background)."""
+    ex = await workflow_crud.get_workflow_execution_by_id(db, execution_id)
+    if ex is None or ex.user_id != user_id:
+        raise NotFoundException(detail="Workflow execution not found")
+    if ex.status != WorkflowExecutionStatus.IN_PROGRESS.value:
+        raise BadRequestException(
+            detail="Only in-progress executions can be resumed",
+        )
+    jobs = await workflow_crud.list_workflow_jobs_for_execution(db, execution_id)
+    tasks = await workflow_crud.list_workflow_tasks(db, ex.workflow_id)
+    active = [t for t in tasks if t.is_active]
+    active.sort(key=lambda x: (-x.priority, x.id))
+    _, _, reason = _resolve_resume_start(active, jobs)
+    if reason == "has_error":
+        raise BadRequestException(
+            detail="Cannot resume: a workflow step is in error; start a new run instead",
+        )
+    if reason == "job_task_mismatch":
+        raise BadRequestException(detail="Cannot resume: workflow state is inconsistent")
+    if reason == "no_tasks":
+        raise BadRequestException(detail="Workflow has no active tasks")
+    if reason == "unknown":
+        raise BadRequestException(detail="Cannot resume this execution")
+    asyncio.create_task(continue_workflow_execution(execution_id))
+    return {"status": "resumed", "execution_id": execution_id}

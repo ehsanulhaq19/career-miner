@@ -57,6 +57,7 @@ async def get_job_applications(
     base_query = (
         select(JobApplication)
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .order_by(JobApplication.created_at.desc())
     )
     if is_active is not None:
@@ -67,7 +68,8 @@ async def get_job_applications(
     items = list(result.scalars().all())
 
     count_query = select(func.count(JobApplication.id)).where(
-        JobApplication.user_id == user_id
+        JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
     )
     if is_active is not None:
         count_query = count_query.where(JobApplication.is_active.is_(is_active))
@@ -91,12 +93,14 @@ async def get_job_application_dates_grouped(
     grouped = (
         select(date_col, func.count(JobApplication.id).label("application_count"))
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .group_by(date_col)
         .order_by(date_col.desc())
     )
     count_subq = (
         select(date_col)
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .distinct()
         .subquery()
     )
@@ -122,12 +126,14 @@ async def get_job_applications_by_created_date(
     base_query = (
         select(JobApplication)
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .where(date_col == target_date)
         .order_by(JobApplication.created_at.desc())
     )
     count_query = (
         select(func.count(JobApplication.id))
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .where(date_col == target_date)
     )
     query = base_query.offset(skip).limit(limit)
@@ -146,6 +152,7 @@ async def get_job_application_by_id(
         select(JobApplication)
         .where(JobApplication.id == job_application_id)
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
     )
     return result.scalars().first()
 
@@ -163,6 +170,7 @@ async def get_job_application_ids_for_user_by_career_jobs(
     result = await db.execute(
         select(JobApplication.id)
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .where(JobApplication.career_job_id.in_(career_job_ids))
         .order_by(JobApplication.id.desc())
     )
@@ -178,41 +186,48 @@ async def get_active_job_applications_count_by_similarity(
     """
     score_100 = select(func.count(JobApplication.id)).where(
         JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
         JobApplication.is_active.is_(True),
         JobApplication.similarity_score == 100,
     )
     above_90 = select(func.count(JobApplication.id)).where(
         JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
         JobApplication.is_active.is_(True),
         JobApplication.similarity_score >= 90,
         JobApplication.similarity_score < 100,
     )
     above_80 = select(func.count(JobApplication.id)).where(
         JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
         JobApplication.is_active.is_(True),
         JobApplication.similarity_score >= 80,
         JobApplication.similarity_score < 90,
     )
     above_70 = select(func.count(JobApplication.id)).where(
         JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
         JobApplication.is_active.is_(True),
         JobApplication.similarity_score >= 70,
         JobApplication.similarity_score < 80,
     )
     above_60 = select(func.count(JobApplication.id)).where(
         JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
         JobApplication.is_active.is_(True),
         JobApplication.similarity_score >= 60,
         JobApplication.similarity_score < 70,
     )
     above_50 = select(func.count(JobApplication.id)).where(
         JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
         JobApplication.is_active.is_(True),
         JobApplication.similarity_score >= 50,
         JobApplication.similarity_score < 60,
     )
     below_50 = select(func.count(JobApplication.id)).where(
         JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
         JobApplication.is_active.is_(True),
         (JobApplication.similarity_score < 50)
         | (JobApplication.similarity_score.is_(None)),
@@ -253,6 +268,7 @@ async def get_job_applications_by_date_and_similarity(
     base_query = (
         select(JobApplication)
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .where(date_col == target_date)
         .where(JobApplication.similarity_score >= min_similarity_score)
         .order_by(JobApplication.created_at.desc())
@@ -263,6 +279,7 @@ async def get_job_applications_by_date_and_similarity(
     count_query = (
         select(func.count(JobApplication.id))
         .where(JobApplication.user_id == user_id)
+        .where(JobApplication.created_by == user_id)
         .where(date_col == target_date)
         .where(JobApplication.similarity_score >= min_similarity_score)
     )
@@ -383,6 +400,7 @@ async def bulk_update_job_applications_is_active(
         update(JobApplication)
         .where(
             JobApplication.user_id == user_id,
+            JobApplication.created_by == user_id,
             JobApplication.id.in_(job_application_ids),
         )
         .values(is_active=is_active)
@@ -466,6 +484,7 @@ async def filter_job_application_ids_by_min_similarity(
         select(JobApplication.id).where(
             JobApplication.id.in_(job_application_ids),
             JobApplication.user_id == user_id,
+            JobApplication.created_by == user_id,
             JobApplication.similarity_score.isnot(None),
             JobApplication.similarity_score >= min_similarity_score,
         )

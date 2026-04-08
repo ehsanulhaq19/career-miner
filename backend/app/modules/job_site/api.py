@@ -30,7 +30,9 @@ async def list_job_sites_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> JobSiteListResponse:
     """List all job sites with optional filtering and pagination."""
-    return await list_job_sites(db, skip=skip, limit=limit, is_active=is_active)
+    return await list_job_sites(
+        db, skip=skip, limit=limit, is_active=is_active, user_id=current_user.id
+    )
 
 
 @router.get("/{job_site_id}", response_model=JobSiteResponse)
@@ -40,7 +42,7 @@ async def get_job_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> JobSiteResponse:
     """Retrieve a single job site by ID."""
-    return await get_job_site(db, job_site_id)
+    return await get_job_site(db, job_site_id, user_id=current_user.id)
 
 
 @router.post("/", response_model=JobSiteResponse, status_code=201)
@@ -50,7 +52,7 @@ async def create_job_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> JobSiteResponse:
     """Create a new job site."""
-    return await create_job_site(db, job_site_create)
+    return await create_job_site(db, job_site_create, user_id=current_user.id)
 
 
 @router.put("/{job_site_id}", response_model=JobSiteResponse)
@@ -61,7 +63,9 @@ async def update_job_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> JobSiteResponse:
     """Update an existing job site."""
-    return await update_job_site(db, job_site_id, job_site_update)
+    return await update_job_site(
+        db, job_site_id, job_site_update, user_id=current_user.id
+    )
 
 
 @router.delete("/{job_site_id}")
@@ -71,4 +75,4 @@ async def delete_job_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     """Delete a job site by ID."""
-    return await delete_job_site(db, job_site_id)
+    return await delete_job_site(db, job_site_id, user_id=current_user.id)

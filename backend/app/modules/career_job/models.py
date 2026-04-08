@@ -42,5 +42,6 @@ class CareerJob(Base):
     career_client_id = Column(Integer, ForeignKey("career_clients.id"), nullable=True)
     meta_data = Column(JSON, default=dict)
     parsed_data = Column(JSON, default=dict)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

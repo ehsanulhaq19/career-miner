@@ -218,7 +218,7 @@ async def send_career_client_outreach_email(
     and link the email log to the career client.
     """
     client = await crud_get_career_client_by_id(db, client_id)
-    if client is None:
+    if client is None or client.created_by != user_id:
         raise NotFoundException(detail="Career client not found")
     if not _recipient_email_allowed(client.emails or [], client_email):
         raise BadRequestException(
@@ -521,6 +521,7 @@ async def list_career_client_email_rows(
     page: int,
     email_count_sort: str | None,
     created_at_sort: str | None,
+    user_id: int,
 ) -> CareerClientEmailRowsListResponse:
     """
     Return paginated career client email rows with historical send counts.
@@ -529,13 +530,14 @@ async def list_career_client_email_rows(
     if page < 1:
         raise BadRequestException(detail="page must be >= 1")
     skip = (page - 1) * limit
-    total = await count_career_client_email_rows(db)
+    total = await count_career_client_email_rows(db, created_by=user_id)
     rows = await list_career_client_email_rows_paginated(
         db,
         skip=skip,
         limit=limit,
         email_count_sort=email_count_sort,
         created_at_sort=created_at_sort,
+        created_by=user_id,
     )
     items = [CareerClientEmailRowResponse.model_validate(r) for r in rows]
     return CareerClientEmailRowsListResponse(
@@ -555,9 +557,8 @@ async def get_career_client_outreach_email_logs(
     """
     Return email logs for outreach sends linked to a career client.
     """
-    _ = user_id
     client = await crud_get_career_client_by_id(db, career_client_id)
-    if client is None:
+    if client is None or client.created_by != user_id:
         raise NotFoundException(detail="Career client not found")
     logs = await get_outreach_email_logs_for_career_client(
         db, career_client_id, client_email
@@ -566,11 +567,13 @@ async def get_career_client_outreach_email_logs(
 
 
 async def get_career_client_by_id(
-    db: AsyncSession, career_client_id: int
+    db: AsyncSession, career_client_id: int, user_id: int | None = None
 ) -> CareerClientResponse | None:
     """Return a single career client by id or None if not found."""
     client = await crud_get_career_client_by_id(db, career_client_id)
     if client is None:
+        return None
+    if user_id is not None and client.created_by != user_id:
         return None
     return CareerClientResponse.model_validate(client)
 
@@ -699,6 +702,7 @@ def _build_import_create_payload(
 async def import_career_clients(
     db: AsyncSession,
     request: CareerClientImportRequest,
+    user_id: int,
 ) -> CareerClientImportResponse:
     """
     Create or merge career clients from a batch, keyed by name or website host.
@@ -735,12 +739,23 @@ async def import_career_clients(
                 db,
                 name_stripped or None,
                 web_key,
+                created_by=user_id,
             )
             if existing is None:
                 payload = _build_import_create_payload(item, source)
+                payload["created_by"] = user_id
                 await create_career_client(db, payload)
                 created_count += 1
             else:
+                if existing.created_by != user_id:
+                    errors.append(
+                        CareerClientImportErrorItem(
+                            index=idx,
+                            record=item.model_dump(mode="json"),
+                            message="Client belongs to another user",
+                        )
+                    )
+                    continue
                 payload = _build_import_merge_payload(existing, item, source)
                 await crud_update_career_client(db, existing.id, payload)
                 updated_count += 1
@@ -767,6 +782,7 @@ async def list_career_clients(
     email_found_error: bool | None = None,
     has_import_source: bool | None = None,
     has_company_details: bool | None = None,
+    user_id: int | None = None,
 ) -> CareerClientListResponse:
     """Return a paginated list of active career clients in descending order."""
     items, total = await get_career_clients(
@@ -777,6 +793,7 @@ async def list_career_clients(
         email_found_error=email_found_error,
         has_import_source=has_import_source,
         has_company_details=has_company_details,
+        created_by=user_id,
     )
 
     response_items = [CareerClientResponse.model_validate(item) for item in items]
@@ -791,9 +808,15 @@ async def list_career_clients(
 
 
 async def update_career_client(
-    db: AsyncSession, career_client_id: int, update_data: CareerClientUpdate
+    db: AsyncSession,
+    career_client_id: int,
+    update_data: CareerClientUpdate,
+    user_id: int,
 ) -> CareerClientResponse | None:
     """Update an existing career client and return the updated client or None."""
+    existing = await crud_get_career_client_by_id(db, career_client_id)
+    if existing is None or existing.created_by != user_id:
+        return None
     data = update_data.model_dump(exclude_unset=True)
     if not data:
         client = await crud_get_career_client_by_id(db, career_client_id)
@@ -803,20 +826,24 @@ async def update_career_client(
 
 
 async def bulk_update_career_clients(
-    db: AsyncSession, location: str, update_data: CareerClientBulkUpdate
+    db: AsyncSession,
+    location: str,
+    update_data: CareerClientBulkUpdate,
+    user_id: int,
 ) -> int:
     """Bulk update career clients by location. Returns count of updated rows."""
     data = update_data.model_dump(exclude_unset=True)
     if not data:
         return 0
-    return await crud_bulk_update(db, location, data)
+    return await crud_bulk_update(db, location, data, created_by=user_id)
 
 
 async def get_career_client_locations(
     db: AsyncSession,
+    user_id: int | None = None,
 ) -> CareerClientLocationsResponse:
     """Return all distinct locations from career clients."""
-    locations = await crud_get_locations(db)
+    locations = await crud_get_locations(db, created_by=user_id)
     return CareerClientLocationsResponse(locations=locations)
 
 
@@ -826,6 +853,7 @@ ProgressCallback = Callable[[int, int, int, str], Awaitable[None]] | None
 async def _validate_client_emails_core(
     db: AsyncSession,
     request: ValidateEmailsRequest,
+    user_id: int,
     on_progress: ProgressCallback = None,
 ) -> list[ClientInvalidEmailsItem]:
     """
@@ -840,6 +868,7 @@ async def _validate_client_emails_core(
         db,
         client_ids=request.client_ids,
         all_clients=request.all_clients,
+        created_by=user_id,
     )
     clients_with_emails = [c for c in clients if c.emails]
     total = len(clients_with_emails)
@@ -871,10 +900,10 @@ async def _validate_client_emails_core(
 
 
 async def validate_client_emails(
-    db: AsyncSession, request: ValidateEmailsRequest
+    db: AsyncSession, request: ValidateEmailsRequest, user_id: int
 ) -> list[ClientInvalidEmailsItem]:
     """Validate client emails (synchronous within request; no progress)."""
-    return await _validate_client_emails_core(db, request)
+    return await _validate_client_emails_core(db, request, user_id)
 
 
 async def run_validate_client_emails_background(
@@ -911,7 +940,7 @@ async def run_validate_client_emails_background(
     async with async_session() as db:
         try:
             result = await _validate_client_emails_core(
-                db, request, on_progress=on_progress
+                db, request, user_id, on_progress=on_progress
             )
             await db.commit()
             await broadcast_client_email_validation_completed(
@@ -931,7 +960,7 @@ async def run_validate_client_emails_background(
 
 
 async def remove_invalid_emails(
-    db: AsyncSession, items: list[RemoveInvalidEmailsItem]
+    db: AsyncSession, items: list[RemoveInvalidEmailsItem], user_id: int
 ) -> int:
     """
     Remove specified invalid emails from clients. Returns count of updated clients.
@@ -939,7 +968,7 @@ async def remove_invalid_emails(
     updated_count = 0
     for item in items:
         client = await crud_get_career_client_by_id(db, item.client_id)
-        if client is None:
+        if client is None or client.created_by != user_id:
             continue
         current = list(client.emails or [])
         to_remove = {e.lower().strip() for e in item.invalid_emails if e}
@@ -956,7 +985,7 @@ async def remove_invalid_emails(
 
 
 async def scan_career_clients(
-    db: AsyncSession, criteria: CareerClientScanCriteria
+    db: AsyncSession, criteria: CareerClientScanCriteria, user_id: int
 ) -> CareerClientScanResponse:
     """
     Scan active career clients and deactivate those failing the given criteria.
@@ -974,5 +1003,6 @@ async def scan_career_clients(
         db,
         min_description=min_description,
         matching_words=matching_words,
+        created_by=user_id,
     )
     return CareerClientScanResponse(deactivated_count=deactivated_count)
