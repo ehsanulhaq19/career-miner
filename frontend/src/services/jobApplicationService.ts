@@ -21,6 +21,13 @@ export interface LiveJobApplicationPayload {
     | "create_and_send_job_application";
 }
 
+export interface LiveJobDuplicateCheckResult {
+  exists: boolean;
+  career_job_id?: number | null;
+  title?: string | null;
+  description?: string | null;
+}
+
 export interface BulkJobApplicationCreatePayload {
   resume_id: number;
   career_job_ids: number[];
@@ -95,6 +102,14 @@ export const jobApplicationService = {
     const { data } = await api.post<JobApplication>(
       "/job-applications",
       payload
+    );
+    return data;
+  },
+
+  async checkLiveJobDuplicate(job_details: string) {
+    const { data } = await api.post<LiveJobDuplicateCheckResult>(
+      "/job-applications/live/check",
+      { job_details }
     );
     return data;
   },

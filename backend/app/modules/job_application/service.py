@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.career_client.crud import get_career_client_by_id
-from app.modules.career_job.crud import get_career_job_by_id
+from app.modules.career_job.crud import (
+    create_career_job,
+    get_career_job_by_id,
+    get_career_job_for_user_matching_job_details,
+)
 from app.database import async_session
 from app.modules.job_application.crud import (
     create_bulk_job_application,
@@ -53,7 +57,6 @@ _BULK_JOB_APP_HALTED_STATUSES: frozenset[str] = frozenset(
     }
 )
 from app.modules.career_client.crud import create_career_client
-from app.modules.career_job.crud import create_career_job
 from app.modules.job_application.prompts import (
     LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
     LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE,
@@ -70,6 +73,7 @@ from app.modules.job_application.schemas import (
     JobApplicationListResponse,
     JobApplicationResponse,
     LiveJobApplicationAction,
+    LiveJobDuplicateCheckResponse,
 )
 from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.llm.service import LLMFactory
@@ -295,6 +299,29 @@ async def create_job_application_flow(
     return await _enrich_job_application_response(db, job_application)
 
 
+async def check_live_job_duplicate(
+    db: AsyncSession,
+    job_details: str,
+    user_id: int,
+) -> LiveJobDuplicateCheckResponse:
+    """
+    Detect an existing CareerJob for this user with the same pasted/extracted
+    description text (trimmed) or the same stored ``original_job_details``.
+    """
+    text = (job_details or "").strip()
+    if not text:
+        raise BadRequestException(detail="job_details is required")
+    row = await get_career_job_for_user_matching_job_details(db, user_id, text)
+    if row is None:
+        return LiveJobDuplicateCheckResponse(exists=False)
+    return LiveJobDuplicateCheckResponse(
+        exists=True,
+        career_job_id=row.id,
+        title=row.title,
+        description=row.description,
+    )
+
+
 async def create_live_job_application_flow(
     db: AsyncSession,
     job_details: str,
@@ -373,7 +400,10 @@ async def create_live_job_application_flow(
     if not isinstance(parsed_job, dict):
         parsed_job = {}
 
-    job_meta = {"source": LIVE_APPLICATION_SOURCE_LABEL}
+    job_meta = {
+        "source": LIVE_APPLICATION_SOURCE_LABEL,
+        "original_job_details": text,
+    }
     career_job_row = await create_career_job(
         db,
         {

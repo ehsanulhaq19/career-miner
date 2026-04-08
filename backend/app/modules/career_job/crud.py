@@ -1,6 +1,7 @@
 from datetime import date
 
-from sqlalchemy import Date, and_, cast, func, select
+from sqlalchemy import Date, and_, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.career_client.models import CareerClient
@@ -239,6 +240,35 @@ async def get_career_jobs(
 async def get_career_job_by_id(db: AsyncSession, career_job_id: int) -> CareerJob | None:
     """Retrieve a single career job by its primary key."""
     result = await db.execute(select(CareerJob).where(CareerJob.id == career_job_id))
+    return result.scalars().first()
+
+
+async def get_career_job_for_user_matching_job_details(
+    db: AsyncSession,
+    user_id: int,
+    job_details: str,
+) -> CareerJob | None:
+    """
+    Newest career job owned by ``user_id`` whose description (trimmed) equals
+    ``job_details`` (trimmed), or whose ``meta_data['original_job_details']`` matches
+    (set for live-applications from pasted text).
+    """
+    norm = (job_details or "").strip()
+    if not norm:
+        return None
+    desc_match = func.trim(func.coalesce(CareerJob.description, "")) == norm
+    # JSON column: avoid .contains() (compiles to invalid json ~~ on PG). Use JSONB @>.
+    meta_jsonb = cast(CareerJob.meta_data, JSONB)
+    meta_match = meta_jsonb.contains({"original_job_details": norm})
+    result = await db.execute(
+        select(CareerJob)
+        .where(
+            CareerJob.created_by == user_id,
+            or_(desc_match, meta_match),
+        )
+        .order_by(CareerJob.id.desc())
+        .limit(1)
+    )
     return result.scalars().first()
 
 

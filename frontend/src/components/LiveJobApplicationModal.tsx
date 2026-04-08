@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { HiOutlineChevronDown, HiXMark } from "react-icons/hi2";
 import { jobApplicationService } from "@/services/jobApplicationService";
@@ -29,6 +29,10 @@ export default function LiveJobApplicationModal({
   >("create_job_application");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateInfo, setDuplicateInfo] = useState<{
+    title: string;
+    description: string | null;
+  } | null>(null);
   const resumeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,6 +53,7 @@ export default function LiveJobApplicationModal({
     if (!isOpen) return;
     setJobDetails("");
     setError(null);
+    setDuplicateInfo(null);
     setSelectedResume(null);
     setResumeSearch("");
     setAction("create_job_application");
@@ -81,6 +86,30 @@ export default function LiveJobApplicationModal({
     return resume.name.toLowerCase().includes(search);
   });
 
+  const parseAxiosDetail = useCallback((err: unknown): string => {
+    if (axios.isAxiosError(err)) {
+      const d = err.response?.data?.detail;
+      if (typeof d === "string") {
+        return d;
+      }
+      if (Array.isArray(d) && d[0] && typeof d[0] === "object" && "msg" in d[0]) {
+        return String((d[0] as { msg: string }).msg);
+      }
+    }
+    return "Request failed";
+  }, []);
+
+  const runLiveCreate = async () => {
+    if (!selectedResume) return;
+    await jobApplicationService.createLiveJobApplication({
+      job_details: jobDetails.trim(),
+      resume_id: selectedResume.id,
+      action,
+    });
+    onCreated();
+    onClose();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedResume) {
@@ -94,24 +123,38 @@ export default function LiveJobApplicationModal({
     setError(null);
     setSubmitting(true);
     try {
-      await jobApplicationService.createLiveJobApplication({
-        job_details: jobDetails.trim(),
-        resume_id: selectedResume.id,
-        action,
-      });
-      onCreated();
-      onClose();
-    } catch (err: unknown) {
-      let msg = "Request failed";
-      if (axios.isAxiosError(err)) {
-        const d = err.response?.data?.detail;
-        if (typeof d === "string") {
-          msg = d;
-        } else if (Array.isArray(d) && d[0] && typeof d[0] === "object" && "msg" in d[0]) {
-          msg = String((d[0] as { msg: string }).msg);
-        }
+      const dup = await jobApplicationService.checkLiveJobDuplicate(
+        jobDetails.trim()
+      );
+      if (dup.exists) {
+        setDuplicateInfo({
+          title: dup.title?.trim() ? dup.title : "—",
+          description:
+            dup.description != null && dup.description !== ""
+              ? dup.description
+              : null,
+        });
+        setSubmitting(false);
+        return;
       }
-      setError(msg);
+      setDuplicateInfo(null);
+      await runLiveCreate();
+    } catch (err: unknown) {
+      setError(parseAxiosDetail(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const proceedDespiteDuplicate = async () => {
+    if (!selectedResume || !jobDetails.trim()) return;
+    setDuplicateInfo(null);
+    setError(null);
+    setSubmitting(true);
+    try {
+      await runLiveCreate();
+    } catch (err: unknown) {
+      setError(parseAxiosDetail(err));
     } finally {
       setSubmitting(false);
     }
@@ -141,7 +184,10 @@ export default function LiveJobApplicationModal({
             </label>
             <textarea
               value={jobDetails}
-              onChange={(e) => setJobDetails(e.target.value)}
+              onChange={(e) => {
+                setJobDetails(e.target.value);
+                setDuplicateInfo(null);
+              }}
               rows={8}
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
               placeholder="Paste the job posting or listing text"
@@ -188,6 +234,51 @@ export default function LiveJobApplicationModal({
               )}
             </div>
           </div>
+          {duplicateInfo && (
+            <div
+              className="rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-3 space-y-2 text-sm text-gray-900 dark:text-gray-100"
+              role="status"
+            >
+              <p className="font-medium text-amber-900 dark:text-amber-200">
+                A career job you already saved matches this job text
+              </p>
+              <p>
+                <span className="text-gray-600 dark:text-gray-400">Title: </span>
+                <span className="font-medium">{duplicateInfo.title}</span>
+              </p>
+              {duplicateInfo.description ? (
+                <div>
+                  <p className="text-gray-600 dark:text-gray-400 mb-1">
+                    Stored description:
+                  </p>
+                  <pre className="text-xs whitespace-pre-wrap break-words max-h-36 overflow-y-auto bg-white/60 dark:bg-black/30 p-2 rounded border border-amber-100 dark:border-amber-900">
+                    {duplicateInfo.description}
+                  </pre>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  No description stored on the existing record.
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setDuplicateInfo(null)}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  Edit job text
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void proceedDespiteDuplicate()}
+                  disabled={submitting}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-700 text-white hover:bg-amber-800 disabled:opacity-50"
+                >
+                  {submitting ? "Working…" : "Create application anyway"}
+                </button>
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Action

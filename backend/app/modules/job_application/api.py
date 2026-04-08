@@ -18,9 +18,12 @@ from app.modules.job_application.schemas import (
     JobApplicationResponse,
     JobApplicationUpdate,
     LiveJobApplicationCreateRequest,
+    LiveJobDuplicateCheckRequest,
+    LiveJobDuplicateCheckResponse,
 )
 from app.modules.job_application.schemas import EmailLogResponse
 from app.modules.job_application.service import (
+    check_live_job_duplicate,
     create_job_application_flow,
     create_live_job_application_flow,
     get_bulk_job_application_logs,
@@ -59,6 +62,23 @@ async def create_job_application_endpoint(
         career_job_id=request.career_job_id,
         resume_id=request.resume_id,
         user_id=current_user.id,
+    )
+
+
+@router.post("/live/check", response_model=LiveJobDuplicateCheckResponse)
+async def check_live_job_application_duplicate_endpoint(
+    request: LiveJobDuplicateCheckRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> LiveJobDuplicateCheckResponse:
+    """
+    Return whether a career job already exists for this user with the same
+    job text (stored description or original pasted text from a prior live run).
+    """
+    return await check_live_job_duplicate(
+        db,
+        request.job_details,
+        current_user.id,
     )
 
 

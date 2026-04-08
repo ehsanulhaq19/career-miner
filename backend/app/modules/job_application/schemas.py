@@ -21,6 +21,21 @@ class LiveJobApplicationCreateRequest(BaseModel):
     action: LiveJobApplicationAction
 
 
+class LiveJobDuplicateCheckRequest(BaseModel):
+    """Payload for checking whether pasted job text was already saved as a career job for this user."""
+
+    job_details: str = Field(..., min_length=1)
+
+
+class LiveJobDuplicateCheckResponse(BaseModel):
+    """Result of duplicate check against career_jobs for the current user."""
+
+    exists: bool
+    career_job_id: int | None = None
+    title: str | None = None
+    description: str | None = None
+
+
 class JobApplicationCreateRequest(BaseModel):
     """Schema for creating a job application."""
 
