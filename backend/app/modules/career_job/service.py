@@ -83,11 +83,14 @@ async def list_career_jobs(
     site_cache: dict[int, str] = {}
     client_cache: dict[int, str] = {}
     for item in items:
-        job_site_name = site_cache.get(item.job_site_id)
-        if job_site_name is None:
-            site = await get_job_site_by_id(db, item.job_site_id)
-            job_site_name = site.name if site else None
-            site_cache[item.job_site_id] = job_site_name
+        if item.job_site_id is not None:
+            job_site_name = site_cache.get(item.job_site_id)
+            if job_site_name is None:
+                site = await get_job_site_by_id(db, item.job_site_id)
+                job_site_name = site.name if site else None
+                site_cache[item.job_site_id] = job_site_name
+        else:
+            job_site_name = None
 
         career_client_name = None
         if item.career_client_id:
@@ -120,9 +123,12 @@ async def get_career_job(
     if career_job is None:
         raise NotFoundException(detail="Career job not found")
 
-    site = await get_job_site_by_id(db, career_job.job_site_id)
     job_data = CareerJobDetailResponse.model_validate(career_job)
-    job_data.job_site_name = site.name if site else None
+    if career_job.job_site_id is not None:
+        site = await get_job_site_by_id(db, career_job.job_site_id)
+        job_data.job_site_name = site.name if site else None
+    else:
+        job_data.job_site_name = None
     if career_job.career_client_id:
         client = await get_career_client_by_id(db, career_job.career_client_id)
         if client:
@@ -267,11 +273,14 @@ async def get_career_jobs_by_date(
     client_cache = {}
     items = []
     for job, active_count, inactive_count in rows:
-        job_site_name = site_cache.get(job.job_site_id)
-        if job_site_name is None:
-            site = await get_job_site_by_id(db, job.job_site_id)
-            job_site_name = site.name if site else None
-            site_cache[job.job_site_id] = job_site_name
+        if job.job_site_id is not None:
+            job_site_name = site_cache.get(job.job_site_id)
+            if job_site_name is None:
+                site = await get_job_site_by_id(db, job.job_site_id)
+                job_site_name = site.name if site else None
+                site_cache[job.job_site_id] = job_site_name
+        else:
+            job_site_name = None
         career_client_name = None
         career_client_emails: list[str] = []
         career_client_official_website: str | None = None

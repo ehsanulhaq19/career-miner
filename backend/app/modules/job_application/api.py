@@ -17,10 +17,12 @@ from app.modules.job_application.schemas import (
     JobApplicationListResponse,
     JobApplicationResponse,
     JobApplicationUpdate,
+    LiveJobApplicationCreateRequest,
 )
 from app.modules.job_application.schemas import EmailLogResponse
 from app.modules.job_application.service import (
     create_job_application_flow,
+    create_live_job_application_flow,
     get_bulk_job_application_logs,
     get_bulk_job_application_email_send_logs,
     get_job_application,
@@ -57,6 +59,25 @@ async def create_job_application_endpoint(
         career_job_id=request.career_job_id,
         resume_id=request.resume_id,
         user_id=current_user.id,
+    )
+
+
+@router.post("/live", response_model=JobApplicationResponse)
+async def create_live_job_application_endpoint(
+    request: LiveJobApplicationCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobApplicationResponse:
+    """
+    Create client and job from pasted job text via Grok extraction, then create a job
+    application (and optionally send emails) tagged as a live application.
+    """
+    return await create_live_job_application_flow(
+        db,
+        job_details=request.job_details,
+        resume_id=request.resume_id,
+        user_id=current_user.id,
+        action=request.action,
     )
 
 

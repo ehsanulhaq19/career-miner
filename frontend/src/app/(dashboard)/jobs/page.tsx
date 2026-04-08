@@ -258,7 +258,12 @@ export default function JobsPage() {
                   </p>
                 )}
                 <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
-                  <span>{job.job_site_name ?? `Site #${job.job_site_id}`}</span>
+                  <span>
+                    {job.job_site_name ??
+                      (job.job_site_id != null
+                        ? `Site #${job.job_site_id}`
+                        : "—")}
+                  </span>
                   <span>{new Date(job.created_at).toLocaleDateString()}</span>
                 </div>
                 {job.parsed_data?.location && (

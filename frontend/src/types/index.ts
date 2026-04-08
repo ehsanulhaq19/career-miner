@@ -51,8 +51,8 @@ export interface CareerJob {
   title: string;
   description: string | null;
   url: string | null;
-  job_site_id: number;
-  scrap_job_id: number;
+  job_site_id: number | null;
+  scrap_job_id: number | null;
   meta_data: Record<string, any>;
   parsed_data?: ParsedData;
   created_at: string;

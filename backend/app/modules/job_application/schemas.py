@@ -1,6 +1,24 @@
 from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class LiveJobApplicationAction(str, Enum):
+    """
+    Allowed actions when creating a job application from live-pasted job details.
+    """
+
+    CREATE_JOB_APPLICATION = "create_job_application"
+    CREATE_AND_SEND_JOB_APPLICATION = "create_and_send_job_application"
+
+
+class LiveJobApplicationCreateRequest(BaseModel):
+    """Schema for creating a job application from unstructured job text via LLM extraction."""
+
+    job_details: str = Field(..., min_length=1)
+    resume_id: int
+    action: LiveJobApplicationAction
 
 
 class JobApplicationCreateRequest(BaseModel):

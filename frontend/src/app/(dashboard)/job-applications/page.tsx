@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
+  HiOutlineChevronDown,
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
   HiOutlinePaperAirplane,
@@ -15,6 +16,7 @@ import { jobApplicationService } from "@/services/jobApplicationService";
 import { JobApplication, EmailLog } from "@/types";
 import JobApplicationDetailModal from "@/components/JobApplicationDetailModal";
 import CreateJobApplicationModal from "@/components/CreateJobApplicationModal";
+import LiveJobApplicationModal from "@/components/LiveJobApplicationModal";
 import BulkJobApplicationModal from "@/components/BulkJobApplicationModal";
 import BulkJobApplicationEditModal from "@/components/BulkJobApplicationEditModal";
 import BulkEmailSendModal from "@/components/BulkEmailSendModal";
@@ -40,6 +42,9 @@ export default function JobApplicationsPage() {
   const [emailLogsApp, setEmailLogsApp] = useState<JobApplication | null>(null);
   const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
   const [emailLogsLoading, setEmailLogsLoading] = useState(false);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [liveModalOpen, setLiveModalOpen] = useState(false);
+  const createMenuRefHeader = useRef<HTMLDivElement>(null);
 
   const refetch = () => {
     const skip = (page - 1) * limit;
@@ -62,6 +67,17 @@ export default function JobApplicationsPage() {
       })
       .finally(() => setLoading(false));
   }, [page, limit, isActiveFilter]);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!createMenuRefHeader.current?.contains(t)) {
+        setCreateMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -99,20 +115,56 @@ export default function JobApplicationsPage() {
             <HiOutlinePencilSquare className="w-4 h-4" />
             Bulk Edit
           </button>
-          <button
-            onClick={() => setBulkModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <HiOutlineDocumentDuplicate className="w-4 h-4" />
-            Bulk Create
-          </button>
-          <button
-            onClick={() => setCreateModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            <HiOutlinePlus className="w-4 h-4" />
-            Create Job Application
-          </button>
+          <div className="relative" ref={createMenuRefHeader}>
+            <button
+              type="button"
+              onClick={() => setCreateMenuOpen((o) => !o)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <HiOutlinePlus className="w-4 h-4" />
+              Create Job Application
+              <HiOutlineChevronDown
+                className={`w-4 h-4 transition-transform ${createMenuOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {createMenuOpen && (
+              <div className="absolute right-0 mt-1 w-56 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-20 py-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkModalOpen(true);
+                    setCreateMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <HiOutlineDocumentDuplicate className="w-4 h-4 shrink-0" />
+                  Bulk Create
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateModalOpen(true);
+                    setCreateMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <HiOutlinePlus className="w-4 h-4 shrink-0" />
+                  Create Job Application
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLiveModalOpen(true);
+                    setCreateMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  <HiOutlinePaperAirplane className="w-4 h-4 shrink-0" />
+                  Create Live Application
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -137,22 +189,9 @@ export default function JobApplicationsPage() {
           <p className="text-gray-500 dark:text-gray-400">
             No job applications found.
           </p>
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <button
-              onClick={() => setBulkModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              <HiOutlineDocumentDuplicate className="w-4 h-4" />
-              Bulk Create
-            </button>
-            <button
-              onClick={() => setCreateModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
-            >
-              <HiOutlinePlus className="w-4 h-4" />
-              Create Job Application
-            </button>
-          </div>
+          <p className="mt-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+            Use &quot;Create Job Application&quot; above to add applications.
+          </p>
         </div>
       ) : (
         <>
@@ -301,6 +340,15 @@ export default function JobApplicationsPage() {
         onClose={() => setCreateModalOpen(false)}
         onCreated={() => {
           setCreateModalOpen(false);
+          setPage(1);
+          refetch();
+        }}
+      />
+      <LiveJobApplicationModal
+        isOpen={liveModalOpen}
+        onClose={() => setLiveModalOpen(false)}
+        onCreated={() => {
+          setLiveModalOpen(false);
           setPage(1);
           refetch();
         }}

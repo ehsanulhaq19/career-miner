@@ -13,6 +13,14 @@ export interface CreateJobApplicationPayload {
   resume_id: number;
 }
 
+export interface LiveJobApplicationPayload {
+  job_details: string;
+  resume_id: number;
+  action:
+    | "create_job_application"
+    | "create_and_send_job_application";
+}
+
 export interface BulkJobApplicationCreatePayload {
   resume_id: number;
   career_job_ids: number[];
@@ -86,6 +94,14 @@ export const jobApplicationService = {
   async createJobApplication(payload: CreateJobApplicationPayload) {
     const { data } = await api.post<JobApplication>(
       "/job-applications",
+      payload
+    );
+    return data;
+  },
+
+  async createLiveJobApplication(payload: LiveJobApplicationPayload) {
+    const { data } = await api.post<JobApplication>(
+      "/job-applications/live",
       payload
     );
     return data;

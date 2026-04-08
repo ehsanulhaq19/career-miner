@@ -37,6 +37,16 @@ async def get_job_site_by_id(db: AsyncSession, job_site_id: int) -> JobSite | No
     return result.scalars().first()
 
 
+async def get_job_site_by_name(db: AsyncSession, name: str) -> JobSite | None:
+    """Retrieve a job site by exact name match."""
+    if not name or not str(name).strip():
+        return None
+    result = await db.execute(
+        select(JobSite).where(JobSite.name == str(name).strip())
+    )
+    return result.scalars().first()
+
+
 async def create_job_site(db: AsyncSession, data: dict) -> JobSite:
     """Create a new job site record from the provided data dictionary."""
     job_site = JobSite(**data)

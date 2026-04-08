@@ -81,3 +81,35 @@ Parse resume_content and resume_extra_detail to populate the structure. Use empt
 For similarity_score: analyze job_application_data (job requirements, skills, experience) against resume_content and resume_extra_detail. Return a number 0-100 indicating how good a fit the candidate is for the job. Consider skills match, experience relevance, and overall alignment.
 For to_emails: select only the most relevant emails from the client_emails list - prioritize hiring, careers, hr, recruitment, jobs, apply, contact emails.
 """
+
+LIVE_JOB_APPLICATION_SYSTEM_PROMPT = (
+    "Act as a structured data extraction assistant. "
+    "Respond with ONLY a valid JSON object — no markdown, no code fences, no extra text. "
+    "The output must be parseable as JSON."
+)
+
+LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE = """Task: From the job posting or listing text below, extract fields for a career client record and a career job record.
+
+Return a JSON object with exactly two top-level keys: "career_client" and "career_job".
+
+career_client (object):
+- emails: array of strings (empty array if none)
+- phone_numbers: array of strings (empty array if none)
+- official_website: string or null
+- name: string or null (employer or company name)
+- location: string or null
+- detail: string or null (company overview if inferable from text)
+- link: string or null (careers or company URL if present)
+- size: string or null
+
+career_job (object):
+- title: string (required — job title)
+- description: string or null (full description or combined body text)
+- url: string or null (link to the posting if present)
+- parsed_data: object — structured summary for downstream use (e.g. requirements, responsibilities, skills, employment type, location, salary hints). Use only what is supported by the text; empty object allowed.
+
+Do not include job_site_id, scrap_job_id, or meta_data in the output.
+
+Job text:
+{job_details}
+"""

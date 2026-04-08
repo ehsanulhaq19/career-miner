@@ -52,6 +52,12 @@ _BULK_JOB_APP_HALTED_STATUSES: frozenset[str] = frozenset(
         BulkJobApplicationStatus.TERMINATED.value,
     }
 )
+from app.modules.career_client.crud import create_career_client
+from app.modules.career_job.crud import create_career_job
+from app.modules.job_application.prompts import (
+    LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
+    LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE,
+)
 from app.modules.job_application.schemas import (
     BulkJobApplicationEmailSendLogListResponse,
     BulkJobApplicationEmailSendLogResponse,
@@ -63,6 +69,7 @@ from app.modules.job_application.schemas import (
     JobApplicationDateGroupResponse,
     JobApplicationListResponse,
     JobApplicationResponse,
+    LiveJobApplicationAction,
 )
 from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.llm.service import LLMFactory
@@ -96,11 +103,33 @@ def _extract_json_object(text: str) -> str | None:
     return None
 
 
+LIVE_APPLICATION_SOURCE_LABEL = "Live Application"
+
+
 def _generate_application_name() -> str:
     """Generate a unique application name using timestamp."""
     from time import time
 
     return str(int(time() * 1000))
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    """Coerce JSON or scalar values into a list of non-empty strings."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _optional_str(value: object) -> str | None:
+    """Return stripped string or None."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
 
 
 def _render_resume_html(resume_content: dict) -> str:
@@ -263,6 +292,124 @@ async def create_job_application_flow(
     return await _enrich_job_application_response(db, job_application)
 
 
+async def create_live_job_application_flow(
+    db: AsyncSession,
+    job_details: str,
+    resume_id: int,
+    user_id: int,
+    action: LiveJobApplicationAction,
+) -> JobApplicationResponse:
+    """
+    Use Grok to extract client and job fields from free-form job text, persist CareerClient
+    and CareerJob with live-application metadata, run job application generation, attach
+    source on the job application, and optionally send outreach emails.
+    """
+    text = (job_details or "").strip()
+    if not text:
+        raise BadRequestException(detail="job_details is required")
+
+    resume = await get_resume_by_id(db, resume_id, user_id)
+    if resume is None:
+        raise NotFoundException(detail="Resume not found")
+
+    prompt = LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE.format(job_details=text)
+    llm_client = LLMFactory.get_client(
+        provider_name="grok",
+        model_name="grok-4-1-fast-reasoning",
+    )
+    response = await llm_client.generate_content(
+        system_prompt=LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
+        prompt=prompt,
+    )
+    response_text = (response or "").strip()
+    json_str = _extract_json_object(response_text) or response_text
+    json_str = re.sub(r",\s*}", "}", json_str)
+    json_str = re.sub(r",\s*]", "]", json_str)
+
+    try:
+        parsed = json.loads(json_str)
+    except json.JSONDecodeError:
+        raise BadRequestException(
+            detail="Failed to parse LLM extraction response as valid JSON"
+        )
+
+    cc_raw = (
+        parsed.get("career_client")
+        if isinstance(parsed.get("career_client"), dict)
+        else {}
+    )
+    cj_raw = (
+        parsed.get("career_job")
+        if isinstance(parsed.get("career_job"), dict)
+        else {}
+    )
+
+    title = _optional_str(cj_raw.get("title"))
+    if not title:
+        raise BadRequestException(detail="Extracted job title is required")
+
+    client_meta = {"source": LIVE_APPLICATION_SOURCE_LABEL}
+    client_row = await create_career_client(
+        db,
+        {
+            "emails": _normalize_string_list(cc_raw.get("emails")),
+            "phone_numbers": _normalize_string_list(cc_raw.get("phone_numbers")),
+            "official_website": _optional_str(cc_raw.get("official_website")),
+            "name": _optional_str(cc_raw.get("name")),
+            "location": _optional_str(cc_raw.get("location")),
+            "detail": _optional_str(cc_raw.get("detail")),
+            "link": _optional_str(cc_raw.get("link")),
+            "size": _optional_str(cc_raw.get("size")),
+            "meta_data": client_meta,
+            "scrap_client_job_id": None,
+        },
+    )
+
+    parsed_job = cj_raw.get("parsed_data")
+    if not isinstance(parsed_job, dict):
+        parsed_job = {}
+
+    job_meta = {"source": LIVE_APPLICATION_SOURCE_LABEL}
+    career_job_row = await create_career_job(
+        db,
+        {
+            "title": title,
+            "description": _optional_str(cj_raw.get("description")),
+            "url": _optional_str(cj_raw.get("url")),
+            "job_site_id": None,
+            "scrap_job_id": None,
+            "career_client_id": client_row.id,
+            "meta_data": job_meta,
+            "parsed_data": parsed_job,
+        },
+    )
+
+    ja_resp = await create_job_application_flow(
+        db,
+        career_job_id=career_job_row.id,
+        resume_id=resume_id,
+        user_id=user_id,
+    )
+
+    md = dict(ja_resp.meta_data or {})
+    md["source"] = LIVE_APPLICATION_SOURCE_LABEL
+    await crud_update_job_application(
+        db,
+        ja_resp.id,
+        user_id,
+        {"meta_data": md},
+    )
+
+    if action == LiveJobApplicationAction.CREATE_AND_SEND_JOB_APPLICATION:
+        sent = await send_job_application_email(db, ja_resp.id, user_id)
+        return sent
+
+    refreshed = await get_job_application_by_id(db, ja_resp.id, user_id)
+    if refreshed is None:
+        raise NotFoundException(detail="Job application not found")
+    return await _enrich_job_application_response(db, refreshed)
+
+
 async def _enrich_job_application_response(
     db: AsyncSession, job_application
 ) -> JobApplicationResponse:
@@ -272,7 +419,7 @@ async def _enrich_job_application_response(
     career_job = await get_career_job_by_id(db, job_application.career_job_id)
     job_site = None
     career_client = None
-    if career_job:
+    if career_job and career_job.job_site_id is not None:
         job_site = await get_job_site_by_id(db, career_job.job_site_id)
         if career_job.career_client_id:
             career_client = await get_career_client_by_id(

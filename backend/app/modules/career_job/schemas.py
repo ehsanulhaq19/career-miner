@@ -23,8 +23,8 @@ class CareerJobResponse(BaseModel):
     title: str
     description: str | None
     url: str | None
-    job_site_id: int
-    scrap_job_id: int
+    job_site_id: int | None
+    scrap_job_id: int | None
     meta_data: dict
     parsed_data: dict = Field(default_factory=dict)
     created_at: datetime
@@ -85,8 +85,8 @@ class CareerJobWithApplicationCountsResponse(BaseModel):
     title: str
     description: str | None
     url: str | None
-    job_site_id: int
-    scrap_job_id: int
+    job_site_id: int | None
+    scrap_job_id: int | None
     career_client_id: int | None
     meta_data: dict = Field(default_factory=dict)
     parsed_data: dict = Field(default_factory=dict)

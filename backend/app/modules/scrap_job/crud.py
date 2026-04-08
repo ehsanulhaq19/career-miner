@@ -43,6 +43,23 @@ async def get_scrap_job_by_id(db: AsyncSession, scrap_job_id: int) -> ScrapJob |
     return result.scalars().first()
 
 
+async def get_scrap_job_by_name_and_job_site(
+    db: AsyncSession,
+    name: str,
+    job_site_id: int,
+) -> ScrapJob | None:
+    """Retrieve a scrap job by exact name and job_site_id."""
+    if not name or not str(name).strip():
+        return None
+    result = await db.execute(
+        select(ScrapJob).where(
+            ScrapJob.name == str(name).strip(),
+            ScrapJob.job_site_id == job_site_id,
+        )
+    )
+    return result.scalars().first()
+
+
 async def create_scrap_job(db: AsyncSession, data: dict) -> ScrapJob:
     """Create a new scrap job record from the provided data dictionary."""
     scrap_job = ScrapJob(**data)
