@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import Date, and_, cast, func, or_, select
+from sqlalchemy import Date, and_, cast, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -371,8 +371,9 @@ async def check_job_exist(
         parts.append(CareerJob.career_client_id == career_client_id)
     if links:
         parts.append(CareerJob.url.in_(links))
-    result = await db.execute(select(CareerJob.id).where(and_(*parts)))
-    return result.scalar_one_or_none() is not None
+    stmt = select(exists().where(and_(*parts)))
+    result = await db.execute(stmt)
+    return bool(result.scalar())
 
 
 async def get_total_career_jobs_count(db: AsyncSession) -> int:

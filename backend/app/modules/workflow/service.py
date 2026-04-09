@@ -16,7 +16,14 @@ from app.modules.job_application.crud import (
 )
 from app.modules.client_site.crud import get_client_site_by_id
 from app.modules.job_site.crud import get_job_site_by_id
-from app.modules.scrap_job.crud import create_scrap_job
+from app.modules.scrap_job.crud import create_scrap_job, get_scrap_job_by_id
+from app.modules.scrap_client.crud import get_scrap_client_job_by_id
+from app.modules.job_application.crud import (
+    get_bulk_job_application_by_id,
+    get_bulk_job_application_email_send_by_id,
+    get_bulk_job_application_email_send_logs,
+    get_bulk_job_application_logs_by_id,
+)
 from app.modules.scrap_job.models import ScrapJob, ScrapJobStatus
 from app.modules.scraper.service import ScraperService
 from app.modules.workflow import crud as workflow_crud
@@ -903,26 +910,177 @@ async def list_executions_svc(
     )
 
 
+def _coerce_int_stat(value: object) -> int | None:
+    """Parse a statistic value from JSON or numeric types."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_int_from_dict(meta: dict, *keys: str) -> int | None:
+    """Return the first key that yields a coercible integer."""
+    for key in keys:
+        n = _coerce_int_stat(meta.get(key))
+        if n is not None:
+            return n
+    return None
+
+
+async def _stats_from_bulk_job_application_logs(
+    db: AsyncSession,
+    bulk_job_application_id: int,
+) -> tuple[int | None, int | None, int | None]:
+    """Read total, created, and validated counts from the bulk job application completion log."""
+    logs = await get_bulk_job_application_logs_by_id(db, bulk_job_application_id)
+    for log in reversed(logs):
+        if log.action == "bulk_completed" and log.meta_data:
+            m = log.meta_data or {}
+            tf = _first_int_from_dict(m, "total")
+            cr = _first_int_from_dict(m, "created_count")
+            tv = cr
+            return tf, tv, cr
+    return None, None, None
+
+
+async def _stats_from_bulk_email_logs(
+    db: AsyncSession,
+    bulk_id: int,
+) -> tuple[int | None, int | None, int | None]:
+    """Read total, success, and success counts from the bulk email completion log."""
+    logs = await get_bulk_job_application_email_send_logs(db, bulk_id)
+    for log in reversed(logs):
+        if log.action == "bulk_email_completed" and log.meta_data:
+            m = log.meta_data or {}
+            tf = _first_int_from_dict(m, "total")
+            sc = _first_int_from_dict(m, "success_count")
+            return tf, sc, sc
+    return None, None, None
+
+
+async def _resolve_workflow_job_record_stats(
+    db: AsyncSession,
+    job: WorkflowJob,
+) -> tuple[int | None, int | None, int | None]:
+    """
+    Derive total_records_fetched, records_validated, and created_records_count from
+    workflow job meta_data or from the linked ScrapJob, ScrapClientJob, or bulk row and logs.
+    """
+    wj_meta = job.meta_data or {}
+    tf = _first_int_from_dict(wj_meta, "total_records_fetched", "total_fetched")
+    tv = _first_int_from_dict(wj_meta, "records_validated", "validated_count")
+    cr = _first_int_from_dict(wj_meta, "created_records_count", "created_count")
+    rtype = job.created_resource_type
+    rid = job.created_resource_id
+    if not rtype or rid is None:
+        return tf, tv, cr
+    if rtype == LinkedTaskModelName.SCRAP_JOB.value:
+        row = await get_scrap_job_by_id(db, rid)
+        if row is None:
+            return tf, tv, cr
+        m = row.meta_data or {}
+        if tf is None:
+            tf = _first_int_from_dict(
+                m,
+                "total_jobs_scraped_from_html",
+                "total_jobs",
+            )
+        if tv is None:
+            tv = _first_int_from_dict(m, "total_jobs_validated")
+        if cr is None:
+            cr = _first_int_from_dict(m, "total_jobs_created")
+        return tf, tv, cr
+    if rtype == LinkedTaskModelName.SCRAP_CLIENT_JOB.value:
+        row = await get_scrap_client_job_by_id(db, rid)
+        if row is None:
+            return tf, tv, cr
+        m = row.meta_data or {}
+        if tf is None:
+            tf = _first_int_from_dict(m, "total", "total_clients")
+        if tv is None:
+            tv = _first_int_from_dict(m, "completed", "clients_saved")
+        if cr is None:
+            cr = _first_int_from_dict(m, "clients_saved", "completed")
+        if tf is None and tv is not None:
+            tf = tv
+        return tf, tv, cr
+    if rtype == LinkedTaskModelName.BULK_JOB_APPLICATION.value:
+        bulk = await get_bulk_job_application_by_id(db, rid)
+        if bulk is None:
+            return tf, tv, cr
+        m = bulk.meta_data or {}
+        if tf is None:
+            tf = _first_int_from_dict(m, "total")
+        if cr is None:
+            cr = _first_int_from_dict(m, "created_count")
+        if tv is None:
+            tv = cr
+        cj = m.get("career_job_ids")
+        if tf is None and isinstance(cj, list):
+            tf = len(cj)
+        if tf is None or tv is None or cr is None:
+            lt_tf, lt_tv, lt_cr = await _stats_from_bulk_job_application_logs(db, rid)
+            tf = tf if tf is not None else lt_tf
+            tv = tv if tv is not None else lt_tv
+            cr = cr if cr is not None else lt_cr
+        return tf, tv, cr
+    if rtype == LinkedTaskModelName.BULK_JOB_APPLICATION_EMAIL_SEND.value:
+        bulk = await get_bulk_job_application_email_send_by_id(db, rid)
+        if bulk is None:
+            return tf, tv, cr
+        m = bulk.meta_data or {}
+        if tf is None:
+            tf = _first_int_from_dict(m, "total")
+        if cr is None:
+            cr = _first_int_from_dict(m, "success_count")
+        if tv is None:
+            tv = cr
+        jids = m.get("job_application_ids")
+        if tf is None and isinstance(jids, list):
+            tf = len(jids)
+        if tf is None or tv is None or cr is None:
+            lt_tf, lt_tv, lt_cr = await _stats_from_bulk_email_logs(db, rid)
+            tf = tf if tf is not None else lt_tf
+            tv = tv if tv is not None else lt_tv
+            cr = cr if cr is not None else lt_cr
+        return tf, tv, cr
+    return tf, tv, cr
+
+
 async def get_execution_detail_svc(
     db: AsyncSession,
     execution_id: int,
     user_id: int,
 ) -> WorkflowExecutionDetailResponse:
-    """Execution with jobs and logs grouped."""
+    """Execution with jobs, logs, and per-step record statistics."""
     ex = await workflow_crud.get_workflow_execution_by_id(db, execution_id)
     if ex is None or ex.user_id != user_id:
         raise NotFoundException(detail="Workflow execution not found")
     wf = await workflow_crud.get_workflow_by_id(db, ex.workflow_id)
     jobs = await workflow_crud.list_workflow_jobs_for_execution(db, execution_id)
     logs_map: dict[int, list] = {}
+    enriched_jobs: list[WorkflowJobResponse] = []
     for j in jobs:
         logs = await workflow_crud.list_workflow_logs_for_job(db, j.id)
         logs_map[j.id] = [WorkflowLogResponse.model_validate(x) for x in logs]
+        tf, tv, cr = await _resolve_workflow_job_record_stats(db, j)
+        base_job = WorkflowJobResponse.model_validate(j)
+        enriched_jobs.append(
+            base_job.model_copy(
+                update={
+                    "total_records_fetched": tf,
+                    "records_validated": tv,
+                    "created_records_count": cr,
+                }
+            )
+        )
     base = WorkflowExecutionResponse.model_validate(ex)
     return WorkflowExecutionDetailResponse(
         **base.model_dump(),
         workflow_name=wf.name if wf else None,
-        jobs=[WorkflowJobResponse.model_validate(j) for j in jobs],
+        jobs=enriched_jobs,
         logs_by_job_id=logs_map,
     )
 

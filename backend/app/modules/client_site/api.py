@@ -63,7 +63,9 @@ async def update_client_site_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> ClientSiteResponse:
     """Update an existing client site."""
-    return await update_client_site(db, client_site_id, client_site_update)
+    return await update_client_site(
+        db, client_site_id, client_site_update, user_id=current_user.id
+    )
 
 
 @router.delete("/{client_site_id}")

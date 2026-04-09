@@ -131,7 +131,7 @@ async def get_workflow_execution_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> WorkflowExecutionDetailResponse:
-    """Return one execution with jobs and logs."""
+    """Return one execution with jobs, logs, and per-job fetched/validated stats."""
     return await get_execution_detail_svc(db, execution_id, current_user.id)
 
 

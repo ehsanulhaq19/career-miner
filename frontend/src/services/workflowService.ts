@@ -55,6 +55,9 @@ export interface WorkflowJob {
   started_at: string | null;
   completed_at: string | null;
   meta_data: Record<string, unknown>;
+  total_records_fetched?: number | null;
+  records_validated?: number | null;
+  created_records_count?: number | null;
 }
 
 export interface WorkflowLog {

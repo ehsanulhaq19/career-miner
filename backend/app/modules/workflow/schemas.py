@@ -111,6 +111,14 @@ class WorkflowJobResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     meta_data: dict = Field(default_factory=dict)
+    total_records_fetched: int | None = None
+    records_validated: int | None = None
+    created_records_count: int | None = None
+
+    @field_validator("meta_data", mode="before")
+    @classmethod
+    def coerce_job_meta(cls, v: dict | None) -> dict:
+        return v if v is not None else {}
 
 
 class WorkflowLogResponse(BaseModel):

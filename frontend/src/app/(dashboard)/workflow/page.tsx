@@ -751,10 +751,22 @@ export default function WorkflowPage() {
             {executionDetailLoading && (
               <p className="text-sm text-gray-500">Loading…</p>
             )}
-            <h2 className="font-semibold">
-              Execution #{execDetail.id}{" "}
-              {execDetail.workflow_name ? `(${execDetail.workflow_name})` : ""}
-            </h2>
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="font-semibold">
+                Execution #{execDetail.id}{" "}
+                {execDetail.workflow_name ? `(${execDetail.workflow_name})` : ""}
+              </h2>
+              <button
+                type="button"
+                className="shrink-0 px-3 py-1.5 rounded border text-sm"
+                disabled={executionDetailLoading}
+                onClick={() =>
+                  dispatch(fetchWorkflowExecutionDetail(execDetail.id))
+                }
+              >
+                Refresh
+              </button>
+            </div>
             <p className="text-sm">Status: {execDetail.status}</p>
             <div>
               <h3 className="font-medium text-sm mb-2">Jobs</h3>
@@ -766,6 +778,25 @@ export default function WorkflowPage() {
                       <span>
                         {" "}
                         · {j.created_resource_type} #{j.created_resource_id}
+                      </span>
+                    )}
+                    {(j.total_records_fetched != null ||
+                      j.records_validated != null ||
+                      j.created_records_count != null) && (
+                      <span>
+                        {" "}
+                        · Fetched{" "}
+                        {j.total_records_fetched != null
+                          ? j.total_records_fetched
+                          : "—"}{" "}
+                        · Validated{" "}
+                        {j.records_validated != null
+                          ? j.records_validated
+                          : "—"}{" "}
+                        · Created{" "}
+                        {j.created_records_count != null
+                          ? j.created_records_count
+                          : "—"}
                       </span>
                     )}
                     {j.error_detail && <span className="text-red-600"> · {j.error_detail}</span>}
