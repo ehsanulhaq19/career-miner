@@ -228,6 +228,35 @@ export const runWorkflow = createAsyncThunk(
   }
 );
 
+export const runWorkflowFromPriority = createAsyncThunk(
+  "workflow/runFromPriority",
+  async (
+    {
+      workflowId,
+      fromPriority,
+      sourceExecutionId,
+    }: {
+      workflowId: number;
+      fromPriority: number;
+      sourceExecutionId?: number | null;
+    },
+    { rejectWithValue }
+  ) => {
+    try {
+      return await workflowService.runWorkflowFromPriority(
+        workflowId,
+        fromPriority,
+        sourceExecutionId
+      );
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      return rejectWithValue(
+        err.response?.data?.detail || "Failed to start partial workflow run"
+      );
+    }
+  }
+);
+
 export const resumeWorkflowExecution = createAsyncThunk(
   "workflow/resumeExecution",
   async (executionId: number, { rejectWithValue }) => {
@@ -362,6 +391,9 @@ const workflowSlice = createSlice({
         state.error = action.payload as string;
       })
       .addCase(runWorkflow.rejected, (state, action) => {
+        state.error = action.payload as string;
+      })
+      .addCase(runWorkflowFromPriority.rejected, (state, action) => {
         state.error = action.payload as string;
       })
       .addCase(resumeWorkflowExecution.rejected, (state, action) => {

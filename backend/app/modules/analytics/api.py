@@ -18,8 +18,8 @@ async def analytics_summary_endpoint(
     current_user: User = Depends(get_current_user),
 ) -> AnalyticsSummaryResponse:
     """
-    Return aggregate metrics and daily series for scrap runs, career data, applications,
-    application emails, and completed workflow executions.
+    Return aggregate metrics and hourly UTC series for scrap runs, career data,
+    applications, email_logs (job-application sends), and completed workflow executions.
     """
     return await get_analytics_summary(
         db, current_user.id, date_from, date_to

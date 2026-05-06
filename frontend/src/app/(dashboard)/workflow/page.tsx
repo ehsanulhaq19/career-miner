@@ -22,6 +22,7 @@ import {
   removeWorkflowTask,
   resumeWorkflowExecution,
   runWorkflow,
+  runWorkflowFromPriority,
   updateWorkflow,
 } from "@/store/slices/workflowSlice";
 import { jobApplicationService } from "@/services/jobApplicationService";
@@ -100,6 +101,9 @@ export default function WorkflowPage() {
   const [taskAddError, setTaskAddError] = useState<string | null>(null);
   const [resumeBusyExecutionId, setResumeBusyExecutionId] = useState<
     number | null
+  >(null);
+  const [runFromPriorityBusyKey, setRunFromPriorityBusyKey] = useState<
+    string | null
   >(null);
 
   useEffect(() => {
@@ -772,34 +776,74 @@ export default function WorkflowPage() {
               <h3 className="font-medium text-sm mb-2">Jobs</h3>
               <ul className="text-xs space-y-1">
                 {execDetail.jobs.map((j) => (
-                  <li key={j.id} className="border rounded p-2">
-                    Task {j.workflow_task_id} · {j.status}
-                    {j.created_resource_type && (
-                      <span>
-                        {" "}
-                        · {j.created_resource_type} #{j.created_resource_id}
-                      </span>
-                    )}
-                    {(j.total_records_fetched != null ||
-                      j.records_validated != null ||
-                      j.created_records_count != null) && (
-                      <span>
-                        {" "}
-                        · Fetched{" "}
-                        {j.total_records_fetched != null
-                          ? j.total_records_fetched
-                          : "—"}{" "}
-                        · Validated{" "}
-                        {j.records_validated != null
-                          ? j.records_validated
-                          : "—"}{" "}
-                        · Created{" "}
-                        {j.created_records_count != null
-                          ? j.created_records_count
-                          : "—"}
-                      </span>
-                    )}
-                    {j.error_detail && <span className="text-red-600"> · {j.error_detail}</span>}
+                  <li
+                    key={j.id}
+                    className="border rounded p-2 flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <div>
+                      Task {j.workflow_task_id}
+                      {j.task_priority != null ? ` · priority ${j.task_priority}` : ""}{" "}
+                      · {j.status}
+                      {j.created_resource_type && (
+                        <span>
+                          {" "}
+                          · {j.created_resource_type} #{j.created_resource_id}
+                        </span>
+                      )}
+                      {(j.total_records_fetched != null ||
+                        j.records_validated != null ||
+                        j.created_records_count != null) && (
+                        <span>
+                          {" "}
+                          · Fetched{" "}
+                          {j.total_records_fetched != null
+                            ? j.total_records_fetched
+                            : "—"}{" "}
+                          · Validated{" "}
+                          {j.records_validated != null
+                            ? j.records_validated
+                            : "—"}{" "}
+                          · Created{" "}
+                          {j.created_records_count != null
+                            ? j.created_records_count
+                            : "—"}
+                        </span>
+                      )}
+                      {j.error_detail && (
+                        <span className="text-red-600"> · {j.error_detail}</span>
+                      )}
+                    </div>
+                    {j.task_priority != null ? (
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                        disabled={
+                          runFromPriorityBusyKey ===
+                          `${execDetail.workflow_id}-${j.task_priority}`
+                        }
+                        onClick={async () => {
+                          const key = `${execDetail.workflow_id}-${j.task_priority}`;
+                          setRunFromPriorityBusyKey(key);
+                          try {
+                            await dispatch(
+                              runWorkflowFromPriority({
+                                workflowId: execDetail.workflow_id,
+                                fromPriority: j.task_priority as number,
+                                sourceExecutionId: execDetail.id,
+                              })
+                            ).unwrap();
+                            await dispatch(fetchWorkflowExecutions());
+                          } finally {
+                            setRunFromPriorityBusyKey(null);
+                          }
+                        }}
+                      >
+                        {runFromPriorityBusyKey ===
+                        `${execDetail.workflow_id}-${j.task_priority}`
+                          ? "Starting…"
+                          : "Run again from this priority"}
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>

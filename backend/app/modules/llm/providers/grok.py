@@ -8,8 +8,12 @@ from app.core.exceptions import BadRequestException
 from app.modules.llm.crud import get_provider_config
 from app.modules.llm.models import BaseLLMClient
 
+import logging
+import sys
+import traceback
 WEB_SEARCH_TIMEOUT = 30.0
 
+logger = logging.getLogger(__name__)
 
 class GrokLLMClient(BaseLLMClient):
     """LLM client implementation for xAI Grok API using OpenAI-compatible interface."""
@@ -84,9 +88,34 @@ class GrokLLMClient(BaseLLMClient):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ]
-        completion = await self._client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-        )
+
+        try:
+            completion = await self._client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+            )
+        except Exception as e:
+            error_type = type(e).__name__
+            error_message = str(e)
+            tb = traceback.format_exc()
+
+            logger.error(
+                "[GrokLLMClient.generate_content] "
+                "model=%r error_type=%s error_message=%s\n%s",
+                self.model_name,
+                error_type,
+                error_message,
+                tb,
+            )
+
+            # Optional: print as fallback (useful in containers / dev)
+            print(
+                f"[ERROR] model={self.model_name!r} type={error_type} message={error_message}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+            raise
+        
         message = completion.choices[0].message
         return message.content or ""

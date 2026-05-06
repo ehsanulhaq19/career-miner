@@ -52,15 +52,23 @@ const TREND_LEGEND_BG: Record<string, string> = {
   indigo: "bg-indigo-500",
 };
 
-function DailyTrendChart({
-  daily,
+function formatHourAxisLabel(iso: string): string {
+  const d = new Date(iso);
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const h = String(d.getUTCHours()).padStart(2, "0");
+  return `${m}-${day} ${h}h`;
+}
+
+function HourlyTrendChart({
+  hourly,
   keys,
   labels,
   strokeHex,
   legendKeys,
 }: {
-  daily: AnalyticsSummary["daily"];
-  keys: (keyof AnalyticsSummary["daily"][number])[];
+  hourly: AnalyticsSummary["hourly"];
+  keys: (keyof AnalyticsSummary["hourly"][number])[];
   labels: string[];
   strokeHex: string[];
   legendKeys: string[];
@@ -73,16 +81,16 @@ function DailyTrendChart({
   const padB = 28;
   const innerW = w - padL - padR;
   const innerH = h - padT - padB;
-  const n = Math.max(1, daily.length);
+  const n = Math.max(1, hourly.length);
 
   const vals: number[] = [];
-  daily.forEach((row) => {
+  hourly.forEach((row) => {
     keys.forEach((k) => vals.push(Number(row[k]) || 0));
   });
   const yMax = Math.max(1, ...vals);
 
   const seriesPoints = keys.map((key) =>
-    daily
+    hourly
       .map((row, i) => {
         const v = Number(row[key]) || 0;
         const x = padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
@@ -92,7 +100,10 @@ function DailyTrendChart({
       .join(" ")
   );
 
-  const dayLabels = daily.map((r) => r.day.slice(5));
+  const labelEvery = n > 48 ? Math.ceil(n / 24) : n > 24 ? 2 : 1;
+  const xLabels = hourly.map((r, i) =>
+    i % labelEvery === 0 ? formatHourAxisLabel(r.hour_start) : ""
+  );
 
   return (
     <div className="w-full overflow-x-auto">
@@ -128,11 +139,12 @@ function DailyTrendChart({
             points={pts}
           />
         ))}
-        {dayLabels.map((lab, i) => {
+        {xLabels.map((lab, i) => {
+          if (!lab) return null;
           const x = padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
           return (
             <text
-              key={`${lab}-${i}`}
+              key={`x-${i}`}
               x={x}
               y={h - 6}
               textAnchor="middle"
@@ -208,12 +220,12 @@ export function DashboardAnalyticsSection() {
         color: "bg-rose-500",
       },
       {
-        label: "App emails (success)",
+        label: "Email logs (success)",
         value: data.job_application_emails_success,
         color: "bg-green-500",
       },
       {
-        label: "App emails (error)",
+        label: "Email logs (error)",
         value: data.job_application_emails_error,
         color: "bg-red-500",
       },
@@ -233,8 +245,8 @@ export function DashboardAnalyticsSection() {
             Analytics
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Range: totals use inclusive calendar dates (UTC on server). Applications,
-            emails, and workflows are scoped to your account.
+            Range: totals use inclusive calendar dates; trend series are hourly buckets
+            (UTC). Applications, email_logs, and workflows are scoped to your account.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -307,7 +319,7 @@ export function DashboardAnalyticsSection() {
             </div>
             <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
               <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
-                Application emails
+                Email logs
               </h3>
               <BarComparison
                 items={[
@@ -326,14 +338,14 @@ export function DashboardAnalyticsSection() {
             </div>
           </div>
 
-          {data.daily.length > 0 ? (
+          {data.hourly.length > 0 ? (
             <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-8">
               <div>
                 <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
-                  Daily trend: career data & applications
+                  Hourly trend: career data & applications
                 </h3>
-                <DailyTrendChart
-                  daily={data.daily}
+                <HourlyTrendChart
+                  hourly={data.hourly}
                   keys={["jobs_created", "clients_created", "job_applications_created"]}
                   labels={["Jobs created", "Clients created", "Applications"]}
                   strokeHex={["#10b981", "#f59e0b", "#f43f5e"]}
@@ -342,10 +354,10 @@ export function DashboardAnalyticsSection() {
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-4">
-                  Daily trend: scrap runs & workflows
+                  Hourly trend: scrap runs & workflows
                 </h3>
-                <DailyTrendChart
-                  daily={data.daily}
+                <HourlyTrendChart
+                  hourly={data.hourly}
                   keys={[
                     "scrap_web_jobs_run",
                     "scrap_client_jobs_run",

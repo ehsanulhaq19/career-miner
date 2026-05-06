@@ -52,6 +52,79 @@ from app.modules.websocket.service import broadcast_workflow_event
 
 logger = logging.getLogger(__name__)
 
+_WORKFLOW_CONTEXT_LIST_KEYS = (
+    "career_job_ids",
+    "career_client_ids",
+    "job_application_ids",
+)
+
+
+def _workflow_payload_bool(data: dict, key: str, default: bool = False) -> bool:
+    """
+    Read a boolean from workflow task JSON.
+
+    String values like ``\"false\"`` must not be treated as true (non-empty str is truthy in Python).
+    """
+    if key not in data:
+        return default
+    v = data[key]
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return default
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("0", "false", "no", "off", ""):
+            return False
+        if s in ("1", "true", "yes", "on"):
+            return True
+        return default
+    return default
+
+
+def _initial_context_from_source_execution(raw: dict | None) -> dict:
+    """
+    Build initial context for a partial run from a prior execution's saved context.
+
+    Only list keys that accumulate across steps are copied so stale resource ids from
+    later steps are not carried over.
+    """
+    if not raw:
+        return {}
+    out: dict = {}
+    for key in _WORKFLOW_CONTEXT_LIST_KEYS:
+        val = raw.get(key)
+        if isinstance(val, list):
+            out[key] = list(val)
+        elif val is not None:
+            try:
+                out[key] = list(val)
+            except TypeError:
+                pass
+    return out
+
+
+def _merge_workflow_context_delta(context: dict, delta: dict) -> None:
+    """
+    Merge a task result into the execution context.
+
+    List fields from multiple scrap or bulk steps are combined in order without
+    duplicates so downstream tasks see every collected id.
+    """
+    for key, value in delta.items():
+        if key in _WORKFLOW_CONTEXT_LIST_KEYS and isinstance(value, list):
+            existing = list(context.get(key) or [])
+            seen = set(existing)
+            for item in value:
+                if item not in seen:
+                    seen.add(item)
+                    existing.append(item)
+            context[key] = existing
+        else:
+            context[key] = value
+
 
 async def _wf_append_log(
     db: AsyncSession,
@@ -321,14 +394,16 @@ async def _dispatch_scrap_client_job(
 
     if mode == "email":
         client_ids = list(data.get("client_ids") or [])
-        if data.get("use_previous_career_clients"):
+        if _workflow_payload_bool(data, "use_previous_career_clients"):
             cj = context.get("career_job_ids") or []
             if cj:
                 async with async_session() as db:
                     client_ids = await get_career_client_ids_for_career_jobs(
                         db, cj, created_by=user_id
                     )
-        only_without = bool(data.get("only_clients_without_emails", False))
+        only_without = _workflow_payload_bool(
+            data, "only_clients_without_emails", False
+        )
         url = data.get("url")
         async with async_session() as db:
             sj = await create_scrap_client_job(
@@ -375,7 +450,7 @@ async def _dispatch_bulk_job_application(
 
     resume_id = data["resume_id"]
     career_job_ids = list(data.get("career_job_ids") or [])
-    if data.get("use_previous_career_jobs"):
+    if _workflow_payload_bool(data, "use_previous_career_jobs"):
         career_job_ids = list(context.get("career_job_ids") or [])
     if not career_job_ids:
         raise BadRequestException(detail="No career_job_ids for bulk applications")
@@ -412,7 +487,7 @@ async def _dispatch_bulk_email(
     )
 
     ja_ids = list(data.get("job_application_ids") or [])
-    if data.get("use_previous_job_applications"):
+    if _workflow_payload_bool(data, "use_previous_job_applications"):
         ja_ids = list(context.get("job_application_ids") or [])
     if not ja_ids:
         raise BadRequestException(detail="No job_application_ids for bulk email")
@@ -572,7 +647,7 @@ async def _execute_workflow_tasks_loop(
                 user_id,
                 ex_id,
             )
-            context.update(delta)
+            _merge_workflow_context_delta(context, delta)
             rtype, rid = _resolve_resource(delta)
             wj_row_status = await _workflow_job_row_status_for_linked_task(
                 task.linked_task_model, delta
@@ -739,12 +814,82 @@ async def execute_workflow_run(workflow_id: int) -> None:
     )
 
 
+async def execute_workflow_run_from_priority(
+    workflow_id: int,
+    from_priority: int,
+    source_execution_id: int | None = None,
+) -> None:
+    """
+    Execute active tasks from the first step whose template priority equals
+    from_priority through the remaining steps in normal execution order.
+
+    When source_execution_id is set, list context fields (career_job_ids, etc.)
+    are initialized from that run so steps that rely on ``use_previous_*`` still work.
+    """
+    async with async_session() as db:
+        wf = await workflow_crud.get_workflow_by_id(db, workflow_id)
+        if wf is None or not wf.is_active:
+            return
+        user_id = wf.user_id
+        ex = await workflow_crud.create_workflow_execution(
+            db,
+            {
+                "workflow_id": wf.id,
+                "user_id": user_id,
+                "status": WorkflowExecutionStatus.IN_PROGRESS.value,
+                "meta_data": {"context": {}},
+            },
+        )
+        await workflow_crud.touch_workflow_last_execution(db, wf.id)
+        await db.flush()
+        ex_id = ex.id
+        await db.commit()
+
+    tasks: list[WorkflowTask] = []
+    async with async_session() as db:
+        tasks = await workflow_crud.list_workflow_tasks(db, workflow_id)
+    active = [t for t in tasks if t.is_active]
+    active.sort(key=lambda x: (-x.priority, x.id))
+    start_idx = next(
+        (i for i, t in enumerate(active) if t.priority == from_priority),
+        None,
+    )
+    if start_idx is None:
+        async with async_session() as db:
+            await workflow_crud.update_workflow_execution(
+                db,
+                ex_id,
+                {
+                    "status": WorkflowExecutionStatus.ERROR.value,
+                    "completed_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                },
+            )
+            await db.commit()
+        return
+    active_slice = active[start_idx:]
+    context: dict = {}
+    if source_execution_id is not None:
+        async with async_session() as db:
+            src = await workflow_crud.get_workflow_execution_by_id(
+                db, source_execution_id
+            )
+            if (
+                src is not None
+                and src.user_id == user_id
+                and src.workflow_id == workflow_id
+            ):
+                raw_ctx = (src.meta_data or {}).get("context") or {}
+                context = _initial_context_from_source_execution(raw_ctx)
+    await _execute_workflow_tasks_loop(
+        workflow_id, ex_id, user_id, active_slice, 0, None, context
+    )
+
+
 async def tick_due_workflows() -> None:
     """Start background runs for workflows that are due."""
     async with async_session() as db:
         due = await workflow_crud.list_due_workflows(db)
         await db.commit()
-    print("----------due--------", due)
     for wf in due:
         asyncio.create_task(execute_workflow_run(wf.id))
 
@@ -1059,6 +1204,8 @@ async def get_execution_detail_svc(
     if ex is None or ex.user_id != user_id:
         raise NotFoundException(detail="Workflow execution not found")
     wf = await workflow_crud.get_workflow_by_id(db, ex.workflow_id)
+    tasks = await workflow_crud.list_workflow_tasks(db, ex.workflow_id)
+    task_priority_by_id = {t.id: t.priority for t in tasks}
     jobs = await workflow_crud.list_workflow_jobs_for_execution(db, execution_id)
     logs_map: dict[int, list] = {}
     enriched_jobs: list[WorkflowJobResponse] = []
@@ -1073,6 +1220,7 @@ async def get_execution_detail_svc(
                     "total_records_fetched": tf,
                     "records_validated": tv,
                     "created_records_count": cr,
+                    "task_priority": task_priority_by_id.get(j.workflow_task_id),
                 }
             )
         )
@@ -1096,6 +1244,48 @@ async def trigger_workflow_run_svc(
         raise NotFoundException(detail="Workflow not found")
     asyncio.create_task(execute_workflow_run(workflow_id))
     return {"status": "started", "workflow_id": workflow_id}
+
+
+async def trigger_workflow_run_from_priority_svc(
+    db: AsyncSession,
+    workflow_id: int,
+    user_id: int,
+    from_priority: int,
+    source_execution_id: int | None = None,
+) -> dict:
+    """Fire a partial workflow run starting at the first task with the given priority."""
+    wf = await workflow_crud.get_workflow_by_id(db, workflow_id)
+    if wf is None or wf.user_id != user_id:
+        raise NotFoundException(detail="Workflow not found")
+    if source_execution_id is not None:
+        src = await workflow_crud.get_workflow_execution_by_id(
+            db, source_execution_id
+        )
+        if src is None or src.user_id != user_id:
+            raise NotFoundException(detail="Source workflow execution not found")
+        if src.workflow_id != workflow_id:
+            raise BadRequestException(
+                detail="Source execution must belong to the same workflow",
+            )
+    tasks = await workflow_crud.list_workflow_tasks(db, workflow_id)
+    active = [t for t in tasks if t.is_active]
+    if not any(t.priority == from_priority for t in active):
+        raise BadRequestException(
+            detail="No active workflow task uses that priority",
+        )
+    asyncio.create_task(
+        execute_workflow_run_from_priority(
+            workflow_id, from_priority, source_execution_id
+        )
+    )
+    out = {
+        "status": "started",
+        "workflow_id": workflow_id,
+        "from_priority": from_priority,
+    }
+    if source_execution_id is not None:
+        out["source_execution_id"] = source_execution_id
+    return out
 
 
 async def resume_workflow_execution_svc(

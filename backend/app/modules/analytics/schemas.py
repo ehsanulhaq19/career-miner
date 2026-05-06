@@ -1,12 +1,12 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
 
-class AnalyticsDailyRow(BaseModel):
-    """Per-day buckets for dashboard charts."""
+class AnalyticsHourlyRow(BaseModel):
+    """Per-hour buckets (UTC) for dashboard charts."""
 
-    day: date
+    hour_start: datetime
     scrap_web_jobs_run: int = 0
     scrap_web_scraped_records: int = 0
     scrap_client_jobs_run: int = 0
@@ -20,7 +20,7 @@ class AnalyticsDailyRow(BaseModel):
 
 
 class AnalyticsSummaryResponse(BaseModel):
-    """Aggregated analytics totals and optional daily series for a date range."""
+    """Aggregated analytics totals and optional hourly series for a date range."""
 
     date_from: date
     date_to: date
@@ -34,4 +34,4 @@ class AnalyticsSummaryResponse(BaseModel):
     job_application_emails_success: int = 0
     job_application_emails_error: int = 0
     workflows_completed: int = 0
-    daily: list[AnalyticsDailyRow] = Field(default_factory=list)
+    hourly: list[AnalyticsHourlyRow] = Field(default_factory=list)

@@ -10,6 +10,7 @@ from app.modules.workflow.schemas import (
     WorkflowExecutionDetailResponse,
     WorkflowExecutionListResponse,
     WorkflowListResponse,
+    WorkflowRunFromPriorityRequest,
     WorkflowTaskInput,
     WorkflowTaskResponse,
     WorkflowTaskUpdateRequest,
@@ -24,6 +25,7 @@ from app.modules.workflow.service import (
     list_executions_svc,
     list_workflows_svc,
     resume_workflow_execution_svc,
+    trigger_workflow_run_from_priority_svc,
     trigger_workflow_run_svc,
     update_workflow_svc,
     update_workflow_task_svc,
@@ -165,3 +167,20 @@ async def run_workflow_now_endpoint(
 ) -> dict:
     """Trigger an immediate workflow run in the background."""
     return await trigger_workflow_run_svc(db, workflow_id, current_user.id)
+
+
+@router.post("/{workflow_id}/run-from-priority", response_model=dict)
+async def run_workflow_from_priority_endpoint(
+    workflow_id: int,
+    body: WorkflowRunFromPriorityRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Trigger a new run that starts at the first active task with the given priority."""
+    return await trigger_workflow_run_from_priority_svc(
+        db,
+        workflow_id,
+        current_user.id,
+        body.from_priority,
+        body.source_execution_id,
+    )

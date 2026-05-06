@@ -18,7 +18,9 @@ export interface LiveJobApplicationPayload {
   resume_id: number;
   action:
     | "create_job_application"
-    | "create_and_send_job_application";
+    | "create_and_send_job_application"
+    | "prepare_job_application_form";
+  application_form_questions?: string[];
 }
 
 export interface LiveJobDuplicateCheckResult {
@@ -79,6 +81,27 @@ export const jobApplicationService = {
     }
     const { data } = await api.get<PaginatedResponse<JobApplication>>(
       "/job-applications",
+      { params }
+    );
+    return data;
+  },
+
+  async searchJobApplications(
+    q: string,
+    skip = 0,
+    limit = 20,
+    is_active?: boolean
+  ) {
+    const params: Record<string, string | number | boolean> = {
+      q: q.trim(),
+      skip,
+      limit,
+    };
+    if (is_active !== undefined) {
+      params.is_active = is_active;
+    }
+    const { data } = await api.get<PaginatedResponse<JobApplication>>(
+      "/job-applications/search",
       { params }
     );
     return data;

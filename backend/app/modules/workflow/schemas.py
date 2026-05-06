@@ -12,6 +12,13 @@ class WorkflowTaskInput(BaseModel):
     is_active: bool = True
 
 
+class WorkflowRunFromPriorityRequest(BaseModel):
+    """Request body to start a workflow run from a template priority onward."""
+
+    from_priority: int
+    source_execution_id: int | None = None
+
+
 class WorkflowCreateRequest(BaseModel):
     """Request body for creating a workflow with tasks."""
 
@@ -114,6 +121,7 @@ class WorkflowJobResponse(BaseModel):
     total_records_fetched: int | None = None
     records_validated: int | None = None
     created_records_count: int | None = None
+    task_priority: int | None = None
 
     @field_validator("meta_data", mode="before")
     @classmethod

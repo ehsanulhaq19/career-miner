@@ -336,6 +336,28 @@ async def _process_single_client(
     return False, [], website
 
 
+async def discover_emails_for_career_client(
+    career_client_id: int,
+    company_name: str,
+    website_override: str | None = None,
+    client_link: str | None = None,
+) -> tuple[bool, list[str], str | None]:
+    """
+    Run the same email discovery pipeline used by scrap client jobs without job logging
+    or HTML persistence: Gemini web search, DuckDuckGo and other strategies in
+    discover_company_info, website crawl, pattern-based candidates, and
+    validate_scraped_emails_for_storage.
+    """
+    name = (company_name or "").strip() or "Company"
+    return await _process_single_client(
+        career_client_id,
+        name,
+        website_override=website_override,
+        client_link=client_link,
+        scrap_client_job_id=None,
+    )
+
+
 async def _run_client_site_scraper(
     scrap_client_job_id: int,
     client_site_id: int,

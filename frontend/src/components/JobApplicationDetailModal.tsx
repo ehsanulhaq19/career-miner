@@ -4,7 +4,27 @@ import { useEffect, useState, useRef } from "react";
 import { HiXMark, HiOutlineBriefcase, HiOutlineUserGroup } from "react-icons/hi2";
 import { jobApplicationService } from "@/services/jobApplicationService";
 import { careerJobService } from "@/services/careerJobService";
-import { JobApplication, CareerJob } from "@/types";
+import {
+  JobApplication,
+  CareerJob,
+  ApplicationFormQaItem,
+} from "@/types";
+
+function getApplicationFormQa(
+  app: JobApplication
+): ApplicationFormQaItem[] | null {
+  if (app.application_form_qa?.length) {
+    return app.application_form_qa;
+  }
+  const m = app.meta_data?.application_form_qa;
+  if (Array.isArray(m) && m.length) {
+    return m.map((row) => ({
+      question: String((row as { question?: string }).question ?? ""),
+      answer: String((row as { answer?: string }).answer ?? ""),
+    }));
+  }
+  return null;
+}
 import JobDetailModal from "@/components/JobDetailModal";
 import ClientDetailModal from "@/components/ClientDetailModal";
 
@@ -205,6 +225,38 @@ export default function JobApplicationDetailModal({
                     </p>
                   </div>
                 )}
+
+                {(() => {
+                  const formQa = getApplicationFormQa(application);
+                  return formQa && formQa.length > 0 ? (
+                    <div>
+                      <div className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                        Application form
+                      </div>
+                      <ul className="space-y-3">
+                        {formQa.map((row, idx) => (
+                          <li
+                            key={idx}
+                            className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 bg-gray-50/80 dark:bg-gray-800/50"
+                          >
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                              Question
+                            </p>
+                            <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap mb-2">
+                              {row.question}
+                            </p>
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                              Answer
+                            </p>
+                            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                              {row.answer}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null;
+                })()}
 
                 {application.cover_letter && (
                   <div>

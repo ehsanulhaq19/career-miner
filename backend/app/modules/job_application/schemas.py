@@ -1,7 +1,9 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LiveJobApplicationAction(str, Enum):
@@ -11,6 +13,7 @@ class LiveJobApplicationAction(str, Enum):
 
     CREATE_JOB_APPLICATION = "create_job_application"
     CREATE_AND_SEND_JOB_APPLICATION = "create_and_send_job_application"
+    PREPARE_JOB_APPLICATION_FORM = "prepare_job_application_form"
 
 
 class LiveJobApplicationCreateRequest(BaseModel):
@@ -19,6 +22,23 @@ class LiveJobApplicationCreateRequest(BaseModel):
     job_details: str = Field(..., min_length=1)
     resume_id: int
     action: LiveJobApplicationAction
+    application_form_questions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_application_form_questions(self) -> Self:
+        """Require at least one non-empty question when using prepare_job_application_form."""
+        if self.action != LiveJobApplicationAction.PREPARE_JOB_APPLICATION_FORM:
+            return self
+        normalized = [
+            q.strip()
+            for q in self.application_form_questions
+            if isinstance(q, str) and q.strip()
+        ]
+        if not normalized:
+            raise ValueError(
+                "application_form_questions must include at least one non-empty question"
+            )
+        return self
 
 
 class LiveJobDuplicateCheckRequest(BaseModel):
@@ -81,6 +101,13 @@ class JobApplicationUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class ApplicationFormQaItem(BaseModel):
+    """Schema for one application-form screening question and its generated answer."""
+
+    question: str
+    answer: str
+
+
 class JobApplicationResponse(BaseModel):
     """Schema for job application response data."""
 
@@ -98,6 +125,8 @@ class JobApplicationResponse(BaseModel):
     career_job_id: int
     similarity_score: float | None = None
     meta_data: dict = Field(default_factory=dict)
+    application_form_qa: list[ApplicationFormQaItem] | None = None
+    application_form_questions: list[str] | None = None
     is_email_send: bool
     to_emails: list[str] = Field(default_factory=list)
     created_at: datetime

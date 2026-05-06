@@ -113,3 +113,36 @@ Do not include job_site_id, scrap_job_id, or meta_data in the output.
 Job text:
 {job_details}
 """
+
+PREPARE_JOB_APPLICATION_FORM_SYSTEM_PROMPT = (
+    "Act as a job application assistant. Respond with ONLY a valid JSON object. "
+    "No markdown, no code fences, no extra text. The output must be parseable as JSON."
+)
+
+PREPARE_JOB_APPLICATION_FORM_USER_PROMPT_TEMPLATE = """You help a candidate complete employer application screening questions.
+
+Use the job posting text to understand role context. Use the resume only as the factual basis for the candidate profile.
+
+Job posting or listing text:
+{job_details}
+
+Resume content:
+{resume_content}
+
+Resume extra detail (optional):
+{resume_extra_detail}
+
+Answer each of the following questions in order using the job posting for role context and the resume for candidate facts.
+
+Questions (JSON array, in order):
+{questions_json}
+
+Return a JSON object with exactly this structure:
+{{
+  "answers": [
+    {{"question": "<the question text>", "answer": "<concise professional answer>"}}
+  ]
+}}
+
+Include exactly one object in "answers" per question supplied, in the same order. Base answers on the job posting and resume; do not invent employers, dates, or credentials not supported by the resume. If information is missing, state that briefly in the answer.
+"""

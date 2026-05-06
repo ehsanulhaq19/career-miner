@@ -64,6 +64,11 @@ export interface CareerJob {
   job_seen?: boolean;
 }
 
+export interface ApplicationFormQaItem {
+  question: string;
+  answer: string;
+}
+
 export interface JobApplication {
   id: number;
   application_name: string;
@@ -77,6 +82,8 @@ export interface JobApplication {
   career_job_id: number;
   similarity_score?: number | null;
   meta_data: Record<string, unknown>;
+  application_form_qa?: ApplicationFormQaItem[] | null;
+  application_form_questions?: string[] | null;
   is_email_send: boolean;
   to_emails: string[];
   created_at: string;
@@ -291,8 +298,8 @@ export interface JobSiteCard {
   is_active: boolean;
 }
 
-export interface AnalyticsDailyRow {
-  day: string;
+export interface AnalyticsHourlyRow {
+  hour_start: string;
   scrap_web_jobs_run: number;
   scrap_web_scraped_records: number;
   scrap_client_jobs_run: number;
@@ -318,7 +325,7 @@ export interface AnalyticsSummary {
   job_application_emails_success: number;
   job_application_emails_error: number;
   workflows_completed: number;
-  daily: AnalyticsDailyRow[];
+  hourly: AnalyticsHourlyRow[];
 }
 
 export interface PaginatedResponse<T> {

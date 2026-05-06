@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   HiOutlineChevronDown,
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
+  HiOutlineMagnifyingGlass,
   HiOutlinePaperAirplane,
   HiOutlinePlus,
   HiOutlineDocumentDuplicate,
@@ -45,28 +46,51 @@ export default function JobApplicationsPage() {
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [liveModalOpen, setLiveModalOpen] = useState(false);
   const createMenuRefHeader = useRef<HTMLDivElement>(null);
-
-  const refetch = () => {
-    const skip = (page - 1) * limit;
-    jobApplicationService
-      .getJobApplications(skip, limit, isActiveFilter)
-      .then((data) => {
-        setItems(data.items);
-        setTotal(data.total);
-      });
-  };
+  const [searchInput, setSearchInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
+    const t = setTimeout(() => {
+      const next = searchInput.trim();
+      setSearchTerm((prev) => {
+        if (prev !== next) {
+          setPage(1);
+        }
+        return next;
+      });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const loadApplications = useCallback(() => {
     setLoading(true);
     const skip = (page - 1) * limit;
-    jobApplicationService
-      .getJobApplications(skip, limit, isActiveFilter)
+    const req =
+      searchTerm.length > 0
+        ? jobApplicationService.searchJobApplications(
+            searchTerm,
+            skip,
+            limit,
+            isActiveFilter
+          )
+        : jobApplicationService.getJobApplications(
+            skip,
+            limit,
+            isActiveFilter
+          );
+    req
       .then((data) => {
         setItems(data.items);
         setTotal(data.total);
       })
       .finally(() => setLoading(false));
-  }, [page, limit, isActiveFilter]);
+  }, [page, limit, isActiveFilter, searchTerm]);
+
+  useEffect(() => {
+    loadApplications();
+  }, [loadApplications]);
+
+  const refetch = loadApplications;
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -87,7 +111,7 @@ export default function JobApplicationsPage() {
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
           Job Applications
         </h2>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -168,6 +192,18 @@ export default function JobApplicationsPage() {
         </div>
       </div>
 
+      <div className="relative max-w-xl">
+        <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+        <input
+          type="search"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="Search by job title, company, application name, subject, or cover letter…"
+          className="w-full pl-10 pr-4 py-2.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          aria-label="Search job applications"
+        />
+      </div>
+
       {loading && items.length === 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
@@ -187,10 +223,14 @@ export default function JobApplicationsPage() {
         <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-12 text-center">
           <HiOutlinePaperAirplane className="w-12 h-12 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
           <p className="text-gray-500 dark:text-gray-400">
-            No job applications found.
+            {searchTerm.length > 0
+              ? "No job applications match your search."
+              : "No job applications found."}
           </p>
           <p className="mt-4 text-sm text-gray-500 dark:text-gray-400 text-center">
-            Use &quot;Create Job Application&quot; above to add applications.
+            {searchTerm.length > 0
+              ? "Try different keywords or clear the search box."
+              : 'Use "Create Job Application" above to add applications.'}
           </p>
         </div>
       ) : (

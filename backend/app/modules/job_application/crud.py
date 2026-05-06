@@ -1,8 +1,10 @@
 from datetime import date
 
-from sqlalchemy import Date, cast, func, select, update
+from sqlalchemy import Date, and_, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.career_client.models import CareerClient
+from app.modules.career_job.models import CareerJob
 from app.modules.job_application.models import (
     BulkJobApplication,
     BulkJobApplicationLog,
@@ -14,6 +16,84 @@ from app.modules.job_application.models import (
     JobApplicationBulkJobApplicationLink,
     JobApplicationEmailLog,
 )
+
+
+def _ilike_pattern(term: str) -> str:
+    """
+    Build a LIKE pattern for ilike with backslash escapes for % and _ in the user term.
+    """
+    s = term.strip()
+    escaped = (
+        s.replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{escaped}%"
+
+
+async def get_job_applications_by_search(
+    db: AsyncSession,
+    user_id: int,
+    search_term: str,
+    skip: int = 0,
+    limit: int = 20,
+    is_active: bool | None = None,
+) -> tuple[list[JobApplication], int]:
+    """
+    Return job applications whose related application row, career job, or career client
+    matches the search term (case-insensitive substring).
+    """
+    pat = _ilike_pattern(search_term)
+    esc = "\\"
+    client_scope = or_(
+        CareerClient.id.is_(None),
+        CareerClient.created_by == user_id,
+    )
+    match_any = or_(
+        JobApplication.application_name.ilike(pat, escape=esc),
+        JobApplication.subject.ilike(pat, escape=esc),
+        JobApplication.cover_letter.ilike(pat, escape=esc),
+        CareerJob.title.ilike(pat, escape=esc),
+        CareerJob.description.ilike(pat, escape=esc),
+        CareerJob.url.ilike(pat, escape=esc),
+        CareerClient.name.ilike(pat, escape=esc),
+        CareerClient.location.ilike(pat, escape=esc),
+        CareerClient.official_website.ilike(pat, escape=esc),
+        CareerClient.detail.ilike(pat, escape=esc),
+        CareerClient.link.ilike(pat, escape=esc),
+    )
+    base_filters = [
+        JobApplication.user_id == user_id,
+        JobApplication.created_by == user_id,
+        CareerJob.created_by == user_id,
+        client_scope,
+        match_any,
+    ]
+    if is_active is not None:
+        base_filters.append(JobApplication.is_active.is_(is_active))
+
+    stmt = (
+        select(JobApplication)
+        .join(CareerJob, JobApplication.career_job_id == CareerJob.id)
+        .outerjoin(CareerClient, CareerJob.career_client_id == CareerClient.id)
+        .where(and_(*base_filters))
+        .order_by(JobApplication.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    items = list(result.scalars().all())
+
+    count_stmt = (
+        select(func.count(JobApplication.id))
+        .select_from(JobApplication)
+        .join(CareerJob, JobApplication.career_job_id == CareerJob.id)
+        .outerjoin(CareerClient, CareerJob.career_client_id == CareerClient.id)
+        .where(and_(*base_filters))
+    )
+    count_result = await db.execute(count_stmt)
+    total = count_result.scalar() or 0
+    return items, total
 
 
 async def record_job_application_bulk_job_application_link(

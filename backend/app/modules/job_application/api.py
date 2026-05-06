@@ -34,6 +34,7 @@ from app.modules.job_application.service import (
     get_job_application_file_path,
     list_job_applications,
     list_job_applications_by_created_date,
+    search_job_applications,
     list_job_applications_for_bulk_email,
     run_bulk_job_application_background,
     run_bulk_job_application_email_background,
@@ -98,6 +99,7 @@ async def create_live_job_application_endpoint(
         resume_id=request.resume_id,
         user_id=current_user.id,
         action=request.action,
+        application_form_questions=request.application_form_questions,
     )
 
 
@@ -165,6 +167,29 @@ async def list_job_applications_by_created_date_endpoint(
         target_date=target_date,
         skip=skip,
         limit=limit,
+    )
+
+
+@router.get("/search", response_model=JobApplicationListResponse)
+async def search_job_applications_endpoint(
+    q: str = Query(..., min_length=1, description="Search text"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=500),
+    is_active: bool | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobApplicationListResponse:
+    """
+    Find job applications matching the query on application fields, career job
+    (title, description, url), and career client (name, location, website, detail).
+    """
+    return await search_job_applications(
+        db,
+        user_id=current_user.id,
+        q=q.strip(),
+        skip=skip,
+        limit=limit,
+        is_active=is_active,
     )
 
 
@@ -343,6 +368,8 @@ async def send_job_application_email_endpoint(
 ) -> JobApplicationResponse:
     """
     Send emails for the job application to each configured to_email address.
+    The message body uses the cover letter only; application form questions and
+    answers stored on the record are not included in the email.
     """
     return await send_job_application_email(
         db, job_application_id, current_user.id

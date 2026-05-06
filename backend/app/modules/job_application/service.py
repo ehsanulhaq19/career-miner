@@ -35,6 +35,7 @@ from app.modules.job_application.crud import (
     get_job_application_dates_grouped as crud_get_job_application_dates_grouped,
     get_job_applications,
     get_job_applications_by_created_date,
+    get_job_applications_by_search,
     get_job_applications_by_date_and_similarity,
     update_bulk_job_application_status,
     update_bulk_job_application_email_send_status,
@@ -44,6 +45,10 @@ from app.modules.job_application.crud import (
 from app.modules.job_application.prompts import (
     JOB_APPLICATION_SYSTEM_PROMPT,
     JOB_APPLICATION_USER_PROMPT_TEMPLATE,
+    LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
+    LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE,
+    PREPARE_JOB_APPLICATION_FORM_SYSTEM_PROMPT,
+    PREPARE_JOB_APPLICATION_FORM_USER_PROMPT_TEMPLATE,
 )
 from app.modules.job_application.models import (
     BulkJobApplicationEmailSendStatus,
@@ -56,12 +61,9 @@ _BULK_JOB_APP_HALTED_STATUSES: frozenset[str] = frozenset(
         BulkJobApplicationStatus.TERMINATED.value,
     }
 )
-from app.modules.career_client.crud import create_career_client
-from app.modules.job_application.prompts import (
-    LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
-    LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE,
-)
+from app.modules.career_client.crud import create_career_client, update_career_client
 from app.modules.job_application.schemas import (
+    ApplicationFormQaItem,
     BulkJobApplicationEmailSendLogListResponse,
     BulkJobApplicationEmailSendLogResponse,
     BulkJobApplicationLogListResponse,
@@ -79,6 +81,7 @@ from app.modules.job_site.crud import get_job_site_by_id
 from app.modules.llm.service import LLMFactory
 from app.modules.resume.crud import get_resume_by_id
 from app.modules.email.service import EmailService
+from app.modules.scrap_client.service import discover_emails_for_career_client
 from app.modules.websocket.service import (
     broadcast_bulk_job_application_email_send_log,
     broadcast_bulk_job_application_log,
@@ -108,6 +111,105 @@ def _extract_json_object(text: str) -> str | None:
 
 
 LIVE_APPLICATION_SOURCE_LABEL = "Live Application"
+
+APPLICATION_FORM_QA_COVER_LETTER_MARKER = "Application form responses"
+
+
+def _cover_letter_for_email_send(cover_letter: str | None) -> str:
+    """Return cover letter text for outbound email, without the application form Q&A appendix."""
+    text = (cover_letter or "").strip()
+    if not text:
+        return ""
+    idx = text.find(APPLICATION_FORM_QA_COVER_LETTER_MARKER)
+    if idx == -1:
+        return cover_letter or ""
+    return text[:idx].rstrip()
+
+
+def _format_application_form_qa_for_cover_letter(
+    items: list[dict[str, str]],
+) -> str:
+    """Join application form Q&A pairs into a cover-letter appendix section."""
+    lines: list[str] = [APPLICATION_FORM_QA_COVER_LETTER_MARKER]
+    for row in items:
+        q = (row.get("question") or "").strip()
+        a = (row.get("answer") or "").strip()
+        lines.append("")
+        lines.append(f"Q: {q}")
+        lines.append(f"A: {a}")
+    return "\n".join(lines)
+
+
+async def _run_live_job_extraction_llm(job_details: str) -> dict:
+    """Call the LLM to extract career client and career job fields from pasted job text."""
+    prompt = LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE.format(job_details=job_details)
+    llm_client = LLMFactory.get_client(
+        provider_name="grok",
+        model_name="grok-4-1-fast-reasoning",
+    )
+    response = await llm_client.generate_content(
+        system_prompt=LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
+        prompt=prompt,
+    )
+    response_text = (response or "").strip()
+    json_str = _extract_json_object(response_text) or response_text
+    json_str = re.sub(r",\s*}", "}", json_str)
+    json_str = re.sub(r",\s*]", "]", json_str)
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        raise BadRequestException(
+            detail="Failed to parse LLM extraction response as valid JSON"
+        )
+
+
+async def _generate_application_form_answers(
+    job_details: str,
+    resume,
+    questions: list[str],
+) -> list[dict[str, str]]:
+    """Produce professional answers for each application question using job text and resume."""
+    if not questions:
+        return []
+    questions_json = json.dumps(questions, ensure_ascii=False)
+    resume_content_raw = resume.content or ""
+    resume_extra_detail = getattr(resume, "extra_detail", None) or ""
+    prompt = PREPARE_JOB_APPLICATION_FORM_USER_PROMPT_TEMPLATE.format(
+        job_details=job_details,
+        resume_content=resume_content_raw,
+        resume_extra_detail=resume_extra_detail,
+        questions_json=questions_json,
+    )
+    llm_client = LLMFactory.get_client(
+        provider_name="grok",
+        model_name="grok-4-1-fast-reasoning",
+    )
+    response = await llm_client.generate_content(
+        system_prompt=PREPARE_JOB_APPLICATION_FORM_SYSTEM_PROMPT,
+        prompt=prompt,
+    )
+    response_text = (response or "").strip()
+    json_str = _extract_json_object(response_text) or response_text
+    json_str = re.sub(r",\s*}", "}", json_str)
+    json_str = re.sub(r",\s*]", "]", json_str)
+    try:
+        parsed = json.loads(json_str)
+    except json.JSONDecodeError:
+        raise BadRequestException(
+            detail="Failed to parse application form LLM response as valid JSON"
+        )
+    answers = parsed.get("answers")
+    if not isinstance(answers, list):
+        raise BadRequestException(
+            detail="Application form response missing answers array"
+        )
+    out: list[dict[str, str]] = []
+    for i, q in enumerate(questions):
+        answer_text = ""
+        if i < len(answers) and isinstance(answers[i], dict):
+            answer_text = str(answers[i].get("answer") or "").strip()
+        out.append({"question": q, "answer": answer_text})
+    return out
 
 
 def _generate_application_name() -> str:
@@ -328,11 +430,15 @@ async def create_live_job_application_flow(
     resume_id: int,
     user_id: int,
     action: LiveJobApplicationAction,
+    application_form_questions: list[str] | None = None,
 ) -> JobApplicationResponse:
     """
     Use Grok to extract client and job fields from free-form job text, persist CareerClient
     and CareerJob with live-application metadata, run job application generation, attach
     source on the job application, and optionally send outreach emails.
+    For prepare_job_application_form, also run a dedicated prompt to answer each supplied
+    question from job text and resume, and store those answers in meta_data and the cover
+    letter appendix.
     """
     text = (job_details or "").strip()
     if not text:
@@ -342,26 +448,26 @@ async def create_live_job_application_flow(
     if resume is None:
         raise NotFoundException(detail="Resume not found")
 
-    prompt = LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE.format(job_details=text)
-    llm_client = LLMFactory.get_client(
-        provider_name="grok",
-        model_name="grok-4-1-fast-reasoning",
-    )
-    response = await llm_client.generate_content(
-        system_prompt=LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
-        prompt=prompt,
-    )
-    response_text = (response or "").strip()
-    json_str = _extract_json_object(response_text) or response_text
-    json_str = re.sub(r",\s*}", "}", json_str)
-    json_str = re.sub(r",\s*]", "]", json_str)
+    prepare_qs: list[str] | None = None
+    if action == LiveJobApplicationAction.PREPARE_JOB_APPLICATION_FORM:
+        prepare_qs = [
+            q.strip()
+            for q in (application_form_questions or [])
+            if isinstance(q, str) and q.strip()
+        ]
+        if not prepare_qs:
+            raise BadRequestException(
+                detail="application_form_questions is required for this action"
+            )
 
-    try:
-        parsed = json.loads(json_str)
-    except json.JSONDecodeError:
-        raise BadRequestException(
-            detail="Failed to parse LLM extraction response as valid JSON"
+    form_qa_list: list[dict[str, str]] | None = None
+    if prepare_qs:
+        parsed, form_qa_list = await asyncio.gather(
+            _run_live_job_extraction_llm(text),
+            _generate_application_form_answers(text, resume, prepare_qs),
         )
+    else:
+        parsed = await _run_live_job_extraction_llm(text)
 
     cc_raw = (
         parsed.get("career_client")
@@ -379,10 +485,11 @@ async def create_live_job_application_flow(
         raise BadRequestException(detail="Extracted job title is required")
 
     client_meta = {"source": LIVE_APPLICATION_SOURCE_LABEL}
+    initial_client_emails = _normalize_string_list(cc_raw.get("emails"))
     client_row = await create_career_client(
         db,
         {
-            "emails": _normalize_string_list(cc_raw.get("emails")),
+            "emails": initial_client_emails,
             "phone_numbers": _normalize_string_list(cc_raw.get("phone_numbers")),
             "official_website": _optional_str(cc_raw.get("official_website")),
             "name": _optional_str(cc_raw.get("name")),
@@ -395,6 +502,48 @@ async def create_live_job_application_flow(
             "created_by": user_id,
         },
     )
+
+    if not initial_client_emails:
+        company_name_for_discovery = (
+            (_optional_str(cc_raw.get("name")) or title or "").strip()
+        )
+        if company_name_for_discovery:
+            success, discovered_emails, discovered_website = (
+                await discover_emails_for_career_client(
+                    client_row.id,
+                    company_name_for_discovery,
+                    website_override=_optional_str(cc_raw.get("official_website")),
+                    client_link=_optional_str(cc_raw.get("link")),
+                )
+            )
+            fresh_client = await get_career_client_by_id(db, client_row.id)
+            base_meta: dict = {}
+            if fresh_client and isinstance(fresh_client.meta_data, dict):
+                base_meta = dict(fresh_client.meta_data)
+            if success and discovered_emails:
+                base_meta["email_found_error"] = False
+                await update_career_client(
+                    db,
+                    client_row.id,
+                    {
+                        "emails": discovered_emails,
+                        "official_website": discovered_website
+                        or (
+                            fresh_client.official_website
+                            if fresh_client
+                            else None
+                        ),
+                        "meta_data": base_meta,
+                    },
+                )
+            else:
+                base_meta["email_found_error"] = True
+                payload: dict = {"meta_data": base_meta}
+                if discovered_website:
+                    payload["official_website"] = discovered_website
+                elif fresh_client and fresh_client.official_website:
+                    payload["official_website"] = fresh_client.official_website
+                await update_career_client(db, client_row.id, payload)
 
     parsed_job = cj_raw.get("parsed_data")
     if not isinstance(parsed_job, dict):
@@ -428,11 +577,24 @@ async def create_live_job_application_flow(
 
     md = dict(ja_resp.meta_data or {})
     md["source"] = LIVE_APPLICATION_SOURCE_LABEL
+    update_payload: dict = {"meta_data": md}
+    if (
+        action == LiveJobApplicationAction.PREPARE_JOB_APPLICATION_FORM
+        and form_qa_list is not None
+        and prepare_qs is not None
+    ):
+        md["application_form_qa"] = form_qa_list
+        md["application_form_questions"] = prepare_qs
+        cover = (ja_resp.cover_letter or "").strip()
+        qa_block = _format_application_form_qa_for_cover_letter(form_qa_list)
+        combined = f"{cover}\n\n{qa_block}" if cover else qa_block
+        update_payload["cover_letter"] = combined
+        update_payload["meta_data"] = md
     await crud_update_job_application(
         db,
         ja_resp.id,
         user_id,
-        {"meta_data": md},
+        update_payload,
     )
 
     if action == LiveJobApplicationAction.CREATE_AND_SEND_JOB_APPLICATION:
@@ -443,6 +605,40 @@ async def create_live_job_application_flow(
     if refreshed is None:
         raise NotFoundException(detail="Job application not found")
     return await _enrich_job_application_response(db, refreshed)
+
+
+def _parse_application_form_qa_from_meta(
+    meta_data: object,
+) -> list[ApplicationFormQaItem] | None:
+    """Build typed application form Q&A from persisted meta_data JSON."""
+    if not isinstance(meta_data, dict):
+        return None
+    raw = meta_data.get("application_form_qa")
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: list[ApplicationFormQaItem] = []
+    for row in raw:
+        if isinstance(row, dict):
+            out.append(
+                ApplicationFormQaItem(
+                    question=str(row.get("question", "")),
+                    answer=str(row.get("answer", "")),
+                )
+            )
+    return out or None
+
+
+def _parse_application_form_questions_from_meta(
+    meta_data: object,
+) -> list[str] | None:
+    """Return user-supplied application form question strings from meta_data."""
+    if not isinstance(meta_data, dict):
+        return None
+    raw = meta_data.get("application_form_questions")
+    if not isinstance(raw, list) or not raw:
+        return None
+    out = [str(x).strip() for x in raw if isinstance(x, str) and str(x).strip()]
+    return out or None
 
 
 async def _enrich_job_application_response(
@@ -477,7 +673,14 @@ async def _enrich_job_application_response(
     response.job_site_name = job_site.name if job_site else None
     response.resume_name = resume.name if resume else None
     response.email_send_count = email_send_count
-    return response
+    qa = _parse_application_form_qa_from_meta(job_application.meta_data)
+    aq = _parse_application_form_questions_from_meta(job_application.meta_data)
+    return response.model_copy(
+        update={
+            "application_form_qa": qa,
+            "application_form_questions": aq,
+        }
+    )
 
 
 async def list_job_applications(
@@ -490,6 +693,42 @@ async def list_job_applications(
     """Return a paginated list of job applications for the user."""
     items, total = await get_job_applications(
         db, user_id, skip=skip, limit=limit, is_active=is_active
+    )
+    response_items = []
+    for item in items:
+        enriched = await _enrich_job_application_response(db, item)
+        response_items.append(enriched)
+    page = (skip // limit) + 1 if limit > 0 else 1
+    return JobApplicationListResponse(
+        items=response_items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+async def search_job_applications(
+    db: AsyncSession,
+    user_id: int,
+    q: str,
+    skip: int = 0,
+    limit: int = 20,
+    is_active: bool | None = None,
+) -> JobApplicationListResponse:
+    """
+    Search the current user's job applications by text on the application record,
+    linked career job, and linked career client.
+    """
+    term = q.strip()
+    if not term:
+        raise BadRequestException(detail="Search query must not be empty")
+    items, total = await get_job_applications_by_search(
+        db,
+        user_id,
+        term,
+        skip=skip,
+        limit=limit,
+        is_active=is_active,
     )
     response_items = []
     for item in items:
@@ -855,7 +1094,7 @@ async def send_job_application_email(
 ) -> JobApplicationResponse:
     """
     Send emails for a job application to each to_email address.
-    Uses subject, cover_letter, output_resume_path from the job application.
+    Uses subject, cover_letter (without application form Q&A appendix), output_resume_path.
     Creates JobApplicationEmailLog for each send attempt (email_logs row)
     and marks is_email_send when every recipient send succeeds.
     """
@@ -870,7 +1109,7 @@ async def send_job_application_email(
         raise BadRequestException(detail="No recipient emails configured")
 
     subject = job_application.subject or ""
-    cover_letter = job_application.cover_letter or ""
+    cover_letter = _cover_letter_for_email_send(job_application.cover_letter)
     attachment_path = job_application.output_resume_path
     resume = await get_resume_by_id(db, job_application.resume_id, user_id)
     attachment_filename = resume.name if resume else None

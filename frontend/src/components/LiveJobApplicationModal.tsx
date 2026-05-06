@@ -2,7 +2,12 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
-import { HiOutlineChevronDown, HiXMark } from "react-icons/hi2";
+import {
+  HiOutlineChevronDown,
+  HiOutlinePlus,
+  HiOutlineTrash,
+  HiXMark,
+} from "react-icons/hi2";
 import { jobApplicationService } from "@/services/jobApplicationService";
 import { resumeService } from "@/services/resumeService";
 import { Resume } from "@/types";
@@ -25,8 +30,11 @@ export default function LiveJobApplicationModal({
   const [resumeDropdownOpen, setResumeDropdownOpen] = useState(false);
   const [jobDetails, setJobDetails] = useState("");
   const [action, setAction] = useState<
-    "create_job_application" | "create_and_send_job_application"
+    | "create_job_application"
+    | "create_and_send_job_application"
+    | "prepare_job_application_form"
   >("create_job_application");
+  const [formQuestions, setFormQuestions] = useState<string[]>([""]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<{
@@ -57,6 +65,7 @@ export default function LiveJobApplicationModal({
     setSelectedResume(null);
     setResumeSearch("");
     setAction("create_job_application");
+    setFormQuestions([""]);
   }, [isOpen]);
 
   useEffect(() => {
@@ -101,10 +110,18 @@ export default function LiveJobApplicationModal({
 
   const runLiveCreate = async () => {
     if (!selectedResume) return;
+    const normalizedQuestions = formQuestions.map((q) => q.trim()).filter(Boolean);
+    if (action === "prepare_job_application_form" && normalizedQuestions.length === 0) {
+      setError("Please add at least one application question");
+      return;
+    }
     await jobApplicationService.createLiveJobApplication({
       job_details: jobDetails.trim(),
       resume_id: selectedResume.id,
       action,
+      ...(action === "prepare_job_application_form"
+        ? { application_form_questions: normalizedQuestions }
+        : {}),
     });
     onCreated();
     onClose();
@@ -119,6 +136,13 @@ export default function LiveJobApplicationModal({
     if (!jobDetails.trim()) {
       setError("Please enter job details");
       return;
+    }
+    if (action === "prepare_job_application_form") {
+      const nq = formQuestions.map((q) => q.trim()).filter(Boolean);
+      if (nq.length === 0) {
+        setError("Please add at least one application question");
+        return;
+      }
     }
     setError(null);
     setSubmitting(true);
@@ -290,6 +314,7 @@ export default function LiveJobApplicationModal({
                   e.target.value as
                     | "create_job_application"
                     | "create_and_send_job_application"
+                    | "prepare_job_application_form"
                 )
               }
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
@@ -298,8 +323,55 @@ export default function LiveJobApplicationModal({
               <option value="create_and_send_job_application">
                 Create and send email
               </option>
+              <option value="prepare_job_application_form">
+                Prepare job application form
+              </option>
             </select>
           </div>
+          {action === "prepare_job_application_form" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Application questions
+              </label>
+              <div className="space-y-2">
+                {formQuestions.map((q, idx) => (
+                  <div key={idx} className="flex gap-2 items-start">
+                    <input
+                      type="text"
+                      value={q}
+                      onChange={(e) => {
+                        const next = [...formQuestions];
+                        next[idx] = e.target.value;
+                        setFormQuestions(next);
+                      }}
+                      className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white"
+                      placeholder="Question from the employer or form"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (formQuestions.length <= 1) return;
+                        setFormQuestions(formQuestions.filter((_, i) => i !== idx));
+                      }}
+                      disabled={formQuestions.length <= 1}
+                      className="shrink-0 p-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Remove question"
+                    >
+                      <HiOutlineTrash className="w-5 h-5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setFormQuestions([...formQuestions, ""])}
+                className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <HiOutlinePlus className="w-4 h-4" />
+                Add question
+              </button>
+            </div>
+          )}
           {error && (
             <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           )}

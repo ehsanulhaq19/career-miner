@@ -22,6 +22,14 @@ SCRAP_JOB_FINISHED_STATUSES: tuple[str, ...] = (
 )
 
 
+def _normalize_hour_bucket(value: datetime | None) -> datetime | None:
+    """Normalize a timestamp to a naive UTC hour start for consistent dict keys."""
+    if value is None:
+        return None
+    dt = value.replace(tzinfo=None) if value.tzinfo else value
+    return dt.replace(minute=0, second=0, microsecond=0)
+
+
 async def fetch_scrap_web_rows_for_range(
     db: AsyncSession, date_from: date, date_to: date, user_id: int
 ) -> list[tuple[object, dict | None]]:
@@ -70,18 +78,24 @@ async def count_career_jobs_created_in_range(
     return int(result.scalar() or 0)
 
 
-async def career_jobs_created_by_day(
+async def career_jobs_created_by_hour(
     db: AsyncSession, date_from: date, date_to: date, user_id: int
-) -> dict[date, int]:
-    """Return map of calendar day to number of career jobs created."""
+) -> dict[datetime, int]:
+    """Return map of hour start (UTC) to number of career jobs created."""
+    hour_bucket = func.date_trunc("hour", CareerJob.created_at).label("hour_bucket")
     result = await db.execute(
-        select(cast(CareerJob.created_at, Date), func.count(CareerJob.id)).where(
+        select(hour_bucket, func.count(CareerJob.id)).where(
             CareerJob.created_by == user_id,
             cast(CareerJob.created_at, Date) >= date_from,
             cast(CareerJob.created_at, Date) <= date_to,
-        ).group_by(cast(CareerJob.created_at, Date))
+        ).group_by(hour_bucket)
     )
-    return {row[0]: int(row[1]) for row in result.all() if row[0] is not None}
+    out: dict[datetime, int] = {}
+    for row in result.all():
+        h = _normalize_hour_bucket(row[0])
+        if h is not None:
+            out[h] = int(row[1])
+    return out
 
 
 async def count_career_clients_created_in_range(
@@ -99,19 +113,25 @@ async def count_career_clients_created_in_range(
     return int(result.scalar() or 0)
 
 
-async def career_clients_created_by_day(
+async def career_clients_created_by_hour(
     db: AsyncSession, date_from: date, date_to: date, user_id: int
-) -> dict[date, int]:
-    """Return map of day to active career clients created."""
+) -> dict[datetime, int]:
+    """Return map of hour start to active career clients created."""
+    hour_bucket = func.date_trunc("hour", CareerClient.created_at).label("hour_bucket")
     result = await db.execute(
-        select(cast(CareerClient.created_at, Date), func.count(CareerClient.id)).where(
+        select(hour_bucket, func.count(CareerClient.id)).where(
             CareerClient.created_by == user_id,
             CareerClient.is_active.is_(True),
             cast(CareerClient.created_at, Date) >= date_from,
             cast(CareerClient.created_at, Date) <= date_to,
-        ).group_by(cast(CareerClient.created_at, Date))
+        ).group_by(hour_bucket)
     )
-    return {row[0]: int(row[1]) for row in result.all() if row[0] is not None}
+    out: dict[datetime, int] = {}
+    for row in result.all():
+        h = _normalize_hour_bucket(row[0])
+        if h is not None:
+            out[h] = int(row[1])
+    return out
 
 
 async def count_job_applications_created_in_range(
@@ -129,35 +149,33 @@ async def count_job_applications_created_in_range(
     return int(result.scalar() or 0)
 
 
-async def job_applications_created_by_day(
+async def job_applications_created_by_hour(
     db: AsyncSession, user_id: int, date_from: date, date_to: date
-) -> dict[date, int]:
-    """Return map of day to job applications created for the user."""
+) -> dict[datetime, int]:
+    """Return map of hour start to job applications created for the user."""
+    hour_bucket = func.date_trunc("hour", JobApplication.created_at).label("hour_bucket")
     result = await db.execute(
-        select(
-            cast(JobApplication.created_at, Date),
-            func.count(JobApplication.id),
-        ).where(
+        select(hour_bucket, func.count(JobApplication.id)).where(
             JobApplication.user_id == user_id,
             JobApplication.created_by == user_id,
             cast(JobApplication.created_at, Date) >= date_from,
             cast(JobApplication.created_at, Date) <= date_to,
-        ).group_by(cast(JobApplication.created_at, Date))
+        ).group_by(hour_bucket)
     )
-    return {row[0]: int(row[1]) for row in result.all() if row[0] is not None}
+    out: dict[datetime, int] = {}
+    for row in result.all():
+        h = _normalize_hour_bucket(row[0])
+        if h is not None:
+            out[h] = int(row[1])
+    return out
 
 
-async def count_job_application_emails_by_status_in_range(
-    db: AsyncSession, user_id: int, date_from: date, date_to: date
-) -> dict[str, int]:
-    """Count email logs linked to the user's job applications, grouped by log status."""
-    result = await db.execute(
-        select(EmailLog.status, func.count(EmailLog.id))
-        .select_from(EmailLog)
-        .join(
-            JobApplicationEmailLog,
-            JobApplicationEmailLog.email_log_id == EmailLog.id,
-        )
+def _job_application_email_log_ids_subquery(user_id: int):
+    """
+    Subquery of email_logs.id values tied to the user's job applications.
+    """
+    return (
+        select(JobApplicationEmailLog.email_log_id)
         .join(
             JobApplication,
             JobApplication.id == JobApplicationEmailLog.job_application_id,
@@ -165,48 +183,46 @@ async def count_job_application_emails_by_status_in_range(
         .where(
             JobApplication.user_id == user_id,
             JobApplication.created_by == user_id,
+        )
+    )
+
+
+async def count_email_logs_by_status_for_user_job_applications(
+    db: AsyncSession, user_id: int, date_from: date, date_to: date
+) -> dict[str, int]:
+    """Count rows in email_logs for the user's job-application sends, by status."""
+    ja_emails = _job_application_email_log_ids_subquery(user_id)
+    result = await db.execute(
+        select(EmailLog.status, func.count(EmailLog.id)).where(
+            EmailLog.id.in_(ja_emails),
             cast(EmailLog.created_at, Date) >= date_from,
             cast(EmailLog.created_at, Date) <= date_to,
-        )
-        .group_by(EmailLog.status)
+        ).group_by(EmailLog.status)
     )
     return {str(row[0]): int(row[1]) for row in result.all() if row[0] is not None}
 
 
-async def job_application_emails_by_day_and_status(
+async def email_logs_by_hour_and_status_for_user_job_applications(
     db: AsyncSession, user_id: int, date_from: date, date_to: date
-) -> dict[date, dict[str, int]]:
+) -> dict[datetime, dict[str, int]]:
     """
-    Nested map day -> {status: count} for job-application-related email logs.
+    Nested map hour_start -> {status: count} for email_logs tied to job applications.
     """
+    ja_emails = _job_application_email_log_ids_subquery(user_id)
+    hour_bucket = func.date_trunc("hour", EmailLog.created_at).label("hour_bucket")
     result = await db.execute(
-        select(
-            cast(EmailLog.created_at, Date),
-            EmailLog.status,
-            func.count(EmailLog.id),
-        )
-        .select_from(EmailLog)
-        .join(
-            JobApplicationEmailLog,
-            JobApplicationEmailLog.email_log_id == EmailLog.id,
-        )
-        .join(
-            JobApplication,
-            JobApplication.id == JobApplicationEmailLog.job_application_id,
-        )
-        .where(
-            JobApplication.user_id == user_id,
-            JobApplication.created_by == user_id,
+        select(hour_bucket, EmailLog.status, func.count(EmailLog.id)).where(
+            EmailLog.id.in_(ja_emails),
             cast(EmailLog.created_at, Date) >= date_from,
             cast(EmailLog.created_at, Date) <= date_to,
-        )
-        .group_by(cast(EmailLog.created_at, Date), EmailLog.status)
+        ).group_by(hour_bucket, EmailLog.status)
     )
-    out: dict[date, dict[str, int]] = defaultdict(dict)
+    out: dict[datetime, dict[str, int]] = defaultdict(dict)
     for row in result.all():
-        d, status, cnt = row[0], row[1], row[2]
-        if d is not None and status is not None:
-            out[d][str(status)] = int(cnt)
+        h = _normalize_hour_bucket(row[0])
+        status, cnt = row[1], row[2]
+        if h is not None and status is not None:
+            out[h][str(status)] = int(cnt)
     return dict(out)
 
 
@@ -226,84 +242,91 @@ async def count_completed_workflow_executions_in_range(
     return int(result.scalar() or 0)
 
 
-async def completed_workflow_executions_by_day(
+async def completed_workflow_executions_by_hour(
     db: AsyncSession, user_id: int, date_from: date, date_to: date
-) -> dict[date, int]:
-    """Map completion day to count of completed workflow runs for the user."""
+) -> dict[datetime, int]:
+    """Map completion hour to count of completed workflow runs for the user."""
+    hour_bucket = func.date_trunc(
+        "hour", WorkflowExecution.completed_at
+    ).label("hour_bucket")
     result = await db.execute(
-        select(
-            cast(WorkflowExecution.completed_at, Date),
-            func.count(WorkflowExecution.id),
-        ).where(
+        select(hour_bucket, func.count(WorkflowExecution.id)).where(
             WorkflowExecution.user_id == user_id,
             WorkflowExecution.status == WorkflowExecutionStatus.COMPLETED.value,
             WorkflowExecution.completed_at.isnot(None),
             cast(WorkflowExecution.completed_at, Date) >= date_from,
             cast(WorkflowExecution.completed_at, Date) <= date_to,
-        ).group_by(cast(WorkflowExecution.completed_at, Date))
+        ).group_by(hour_bucket)
     )
-    return {row[0]: int(row[1]) for row in result.all() if row[0] is not None}
+    out: dict[datetime, int] = {}
+    for row in result.all():
+        h = _normalize_hour_bucket(row[0])
+        if h is not None:
+            out[h] = int(row[1])
+    return out
 
 
-def iter_dates_inclusive(date_from: date, date_to: date) -> Iterable[date]:
-    """Yield each calendar day from date_from through date_to inclusive."""
-    current = date_from
-    while current <= date_to:
-        yield current
-        current += timedelta(days=1)
+def iter_hours_inclusive(date_from: date, date_to: date) -> Iterable[datetime]:
+    """Yield each hour from date_from 00:00 through date_to 23:00 inclusive (naive UTC)."""
+    start = datetime.combine(date_from, datetime.min.time())
+    end_exclusive = datetime.combine(date_to, datetime.min.time()) + timedelta(days=1)
+    cur = start
+    while cur < end_exclusive:
+        yield cur
+        cur += timedelta(hours=1)
 
 
-def _as_calendar_day(value: object) -> date | None:
-    """Normalize SQLAlchemy/datetime values to a calendar date."""
+def _as_hour_start(value: object) -> datetime | None:
+    """Normalize values to the start of the hour bucket (naive UTC)."""
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value.date()
+        return _normalize_hour_bucket(value)
     if isinstance(value, date):
-        return value
+        return datetime.combine(value, datetime.min.time())
     return None
 
 
 def aggregate_scrap_web_from_rows(
     rows: list[tuple[object, dict | None]],
-) -> tuple[int, int, dict[date, tuple[int, int]]]:
+) -> tuple[int, int, dict[datetime, tuple[int, int]]]:
     """
     From scrap job rows, return total runs, total scraped records (from meta),
-    and per-day (runs, scraped sum).
+    and per-hour (runs, scraped sum).
     """
     total_runs = 0
     total_scraped = 0
-    by_day: dict[date, list[int]] = defaultdict(lambda: [0, 0])
+    by_hour: dict[datetime, list[int]] = defaultdict(lambda: [0, 0])
     for updated_at, meta in rows:
-        day = _as_calendar_day(updated_at)
-        if day is None:
+        hour_start = _as_hour_start(updated_at)
+        if hour_start is None:
             continue
         scraped = _scraped_count_from_scrap_job_meta(meta)
         total_runs += 1
         total_scraped += scraped
-        by_day[day][0] += 1
-        by_day[day][1] += scraped
-    flat = {d: (pair[0], pair[1]) for d, pair in by_day.items()}
+        by_hour[hour_start][0] += 1
+        by_hour[hour_start][1] += scraped
+    flat = {h: (pair[0], pair[1]) for h, pair in by_hour.items()}
     return total_runs, total_scraped, flat
 
 
 def aggregate_scrap_client_from_rows(
     rows: list[tuple[object, dict | None]],
-) -> tuple[int, int, dict[date, tuple[int, int]]]:
+) -> tuple[int, int, dict[datetime, tuple[int, int]]]:
     """Same as aggregate_scrap_web_from_rows for scrap client jobs."""
     total_runs = 0
     total_scraped = 0
-    by_day: dict[date, list[int]] = defaultdict(lambda: [0, 0])
+    by_hour: dict[datetime, list[int]] = defaultdict(lambda: [0, 0])
     for updated_at, meta in rows:
-        day = _as_calendar_day(updated_at)
-        if day is None:
+        hour_start = _as_hour_start(updated_at)
+        if hour_start is None:
             continue
         scraped = _scraped_count_from_scrap_client_meta(meta)
         total_runs += 1
         total_scraped += scraped
-        by_day[day][0] += 1
-        by_day[day][1] += scraped
-    flat = {d: (pair[0], pair[1]) for d, pair in by_day.items()}
+        by_hour[hour_start][0] += 1
+        by_hour[hour_start][1] += scraped
+    flat = {h: (pair[0], pair[1]) for h, pair in by_hour.items()}
     return total_runs, total_scraped, flat
 
 

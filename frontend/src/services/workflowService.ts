@@ -58,6 +58,7 @@ export interface WorkflowJob {
   total_records_fetched?: number | null;
   records_validated?: number | null;
   created_records_count?: number | null;
+  task_priority?: number | null;
 }
 
 export interface WorkflowLog {
@@ -163,6 +164,27 @@ export const workflowService = {
     const { data } = await api.post<{ status: string; workflow_id: number }>(
       `/workflows/${id}/run`
     );
+    return data;
+  },
+
+  async runWorkflowFromPriority(
+    workflowId: number,
+    fromPriority: number,
+    sourceExecutionId?: number | null
+  ) {
+    const body: {
+      from_priority: number;
+      source_execution_id?: number;
+    } = { from_priority: fromPriority };
+    if (sourceExecutionId != null) {
+      body.source_execution_id = sourceExecutionId;
+    }
+    const { data } = await api.post<{
+      status: string;
+      workflow_id: number;
+      from_priority: number;
+      source_execution_id?: number;
+    }>(`/workflows/${workflowId}/run-from-priority`, body);
     return data;
   },
 
