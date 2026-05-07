@@ -133,7 +133,7 @@ export default function JobsPage() {
     <div className="space-y-6">
       <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-4">
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-0">
             <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
@@ -276,7 +276,7 @@ export default function JobsPage() {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-between bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 px-6 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 px-4 py-3 sm:px-6">
               <span className="text-sm text-gray-500 dark:text-gray-400">
                 Page {page} of {totalPages} ({total.toLocaleString()} results)
               </span>

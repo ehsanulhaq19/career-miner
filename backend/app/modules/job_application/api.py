@@ -103,7 +103,7 @@ async def create_live_job_application_endpoint(
     )
 
 
-@router.get("/", response_model=JobApplicationListResponse)
+@router.get("", response_model=JobApplicationListResponse)
 async def list_job_applications_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=500),

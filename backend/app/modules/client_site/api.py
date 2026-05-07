@@ -21,7 +21,7 @@ from app.modules.client_site.service import (
 router = APIRouter()
 
 
-@router.get("/", response_model=ClientSiteListResponse)
+@router.get("", response_model=ClientSiteListResponse)
 async def list_client_sites_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),

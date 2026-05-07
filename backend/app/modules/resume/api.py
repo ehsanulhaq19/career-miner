@@ -21,7 +21,7 @@ from app.modules.resume.service import (
 router = APIRouter()
 
 
-@router.post("/", response_model=ResumeResponse)
+@router.post("", response_model=ResumeResponse)
 async def upload_resume_endpoint(
     file: UploadFile = File(...),
     extra_detail: str | None = Form(None),
@@ -34,7 +34,7 @@ async def upload_resume_endpoint(
     return await service_upload_resume(db, file, current_user.id, extra_detail)
 
 
-@router.get("/", response_model=ResumeListResponse)
+@router.get("", response_model=ResumeListResponse)
 async def list_resumes_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=500),

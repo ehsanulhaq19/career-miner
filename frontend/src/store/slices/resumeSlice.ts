@@ -25,11 +25,11 @@ const initialState: ResumeState = {
 export const fetchResumes = createAsyncThunk(
   "resume/fetchAll",
   async (
-    params?: {
+    params: {
       skip?: number;
       limit?: number;
       name?: string;
-    },
+    } = {},
     { rejectWithValue }
   ) => {
     try {

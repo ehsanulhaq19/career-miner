@@ -21,7 +21,7 @@ from app.modules.job_site.service import (
 router = APIRouter()
 
 
-@router.get("/", response_model=JobSiteListResponse)
+@router.get("", response_model=JobSiteListResponse)
 async def list_job_sites_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),

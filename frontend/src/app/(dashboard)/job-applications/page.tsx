@@ -107,11 +107,11 @@ export default function JobApplicationsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white shrink-0">
           Job Applications
         </h2>
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -192,7 +192,7 @@ export default function JobApplicationsPage() {
         </div>
       </div>
 
-      <div className="relative max-w-xl">
+      <div className="relative w-full max-w-xl min-w-0">
         <HiOutlineMagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
         <input
           type="search"
@@ -343,7 +343,7 @@ export default function JobApplicationsPage() {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex justify-between bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 px-6 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 px-4 py-3 sm:px-6">
               <span className="text-sm text-gray-500 dark:text-gray-400">
                 Page {page} of {totalPages} ({total.toLocaleString()} results)
               </span>

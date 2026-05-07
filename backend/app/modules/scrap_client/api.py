@@ -314,7 +314,7 @@ async def resume_scrap_client_job_endpoint(
     return result
 
 
-@router.get("/", response_model=ScrapClientJobListResponse)
+@router.get("", response_model=ScrapClientJobListResponse)
 async def list_scrap_client_jobs_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),

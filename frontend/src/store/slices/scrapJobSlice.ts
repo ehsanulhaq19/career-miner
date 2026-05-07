@@ -23,12 +23,12 @@ const initialState: ScrapJobState = {
 export const fetchScrapJobs = createAsyncThunk(
   "scrapJob/fetchAll",
   async (
-    params?: {
+    params: {
       skip?: number;
       limit?: number;
       job_site_id?: number;
       status?: string;
-    },
+    } = {},
     { rejectWithValue }
   ) => {
     try {

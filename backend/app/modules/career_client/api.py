@@ -117,7 +117,7 @@ async def get_bulk_career_client_email_logs_endpoint(
     )
 
 
-@router.get("/", response_model=CareerClientListResponse)
+@router.get("", response_model=CareerClientListResponse)
 async def list_career_clients_endpoint(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=500),

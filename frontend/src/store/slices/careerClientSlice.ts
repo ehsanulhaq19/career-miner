@@ -54,12 +54,12 @@ function listFilterToQuery(f: ClientListFilter): {
 export const fetchCareerClients = createAsyncThunk(
   "careerClient/fetchAll",
   async (
-    params?: {
+    params: {
       skip?: number;
       limit?: number;
       listFilter?: ClientListFilter;
       sourceFilter?: SourceFilter;
-    },
+    } = {},
     { rejectWithValue }
   ) => {
     try {

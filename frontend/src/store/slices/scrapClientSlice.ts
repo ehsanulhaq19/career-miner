@@ -30,11 +30,11 @@ const initialState: ScrapClientState = {
 export const fetchScrapClientJobs = createAsyncThunk(
   "scrapClient/fetchAll",
   async (
-    params?: {
+    params: {
       skip?: number;
       limit?: number;
       status?: string;
-    },
+    } = {},
     { rejectWithValue }
   ) => {
     try {
