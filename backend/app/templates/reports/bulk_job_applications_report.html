@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bulk Job Applications Report</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 1.2cm 1.4cm;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            font-size: 9pt;
+            line-height: 1.35;
+            color: #1a1a1a;
+            margin: 0;
+            padding: 0;
+        }
+
+        h1 {
+            font-size: 16pt;
+            margin: 0 0 6pt 0;
+            color: #111111;
+        }
+
+        h2 {
+            font-size: 11pt;
+            margin: 14pt 0 6pt 0;
+            color: #222222;
+            border-bottom: 1px solid #cccccc;
+            padding-bottom: 3pt;
+        }
+
+        h3 {
+            font-size: 10pt;
+            margin: 10pt 0 4pt 0;
+            color: #333333;
+        }
+
+        .meta {
+            margin-bottom: 10pt;
+            color: #444444;
+        }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 12pt;
+        }
+
+        .summary-table td {
+            border: 1px solid #dddddd;
+            padding: 5pt 6pt;
+            vertical-align: top;
+        }
+
+        .summary-table td.label {
+            width: 34%;
+            background: #f5f5f5;
+            font-weight: bold;
+        }
+
+        .apps-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 8pt;
+        }
+
+        .apps-table th,
+        .apps-table td {
+            border: 1px solid #dddddd;
+            padding: 4pt 5pt;
+            vertical-align: top;
+            text-align: left;
+        }
+
+        .apps-table th {
+            background: #efefef;
+            font-size: 8pt;
+        }
+
+        .apps-table a {
+            color: #2a6db5;
+            text-decoration: underline;
+        }
+
+        .cover-letter {
+            white-space: pre-wrap;
+            line-height: 1.45;
+            margin: 4pt 0 0 0;
+        }
+
+        .detail-block {
+            margin: 0 0 8pt 0;
+            padding: 6pt;
+            border: 1px solid #e5e5e5;
+            background: #fafafa;
+        }
+
+        .detail-label {
+            font-weight: bold;
+            color: #333333;
+        }
+
+        .muted {
+            color: #666666;
+            font-size: 8pt;
+        }
+
+        .page-break {
+            page-break-before: always;
+        }
+    </style>
+</head>
+<body>
+    <h1>Bulk Job Applications Report</h1>
+    <div class="meta">
+        Generated: {{ report.generated_at }}<br>
+        Workflow execution: #{{ report.workflow_execution_id }}<br>
+        Recipient: {{ report.send_to_email }}
+    </div>
+
+    <table class="summary-table">
+        <tr>
+            <td class="label">Bulk runs included</td>
+            <td>{{ report.summary.bulk_run_count }}</td>
+        </tr>
+        <tr>
+            <td class="label">Total applications</td>
+            <td>{{ report.summary.application_count }}</td>
+        </tr>
+    </table>
+
+    {% for bulk_run in report.bulk_runs %}
+    {% if not loop.first %}
+    <div class="page-break"></div>
+    {% endif %}
+
+    <h2>Bulk run #{{ bulk_run.id }} - {{ bulk_run.name }}</h2>
+    <table class="summary-table">
+        <tr>
+            <td class="label">Status</td>
+            <td>{{ bulk_run.status }}</td>
+        </tr>
+        <tr>
+            <td class="label">Resume</td>
+            <td>{{ bulk_run.resume_name or "N/A" }}</td>
+        </tr>
+        <tr>
+            <td class="label">Applications in run</td>
+            <td>{{ bulk_run.applications|length }}</td>
+        </tr>
+        <tr>
+            <td class="label">Created at</td>
+            <td>{{ bulk_run.created_at }}</td>
+        </tr>
+    </table>
+
+    {% if bulk_run.applications %}
+    <table class="apps-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Application</th>
+                <th>Job</th>
+                <th>Client</th>
+                <th>Score</th>
+                <th>Email sent</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for app in bulk_run.applications %}
+            <tr>
+                <td>{{ app.id }}</td>
+                <td>{{ app.application_name }}</td>
+                <td>
+                  {% if app.career_job_url %}
+                  <a href="{{ app.career_job_url }}">{{ app.career_job_title or "N/A" }}</a>
+                  {% else %}
+                  {{ app.career_job_title or "N/A" }}
+                  {% endif %}
+                </td>
+                <td>
+                  {% if app.career_client_url %}
+                  <a href="{{ app.career_client_url }}">{{ app.career_client_name or "N/A" }}</a>
+                  {% else %}
+                  {{ app.career_client_name or "N/A" }}
+                  {% endif %}
+                </td>
+                <td>{% if app.similarity_score is not none %}{{ app.similarity_score }}{% else %}N/A{% endif %}</td>
+                <td>{% if app.is_email_send %}Yes ({{ app.email_send_count }}){% else %}No{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% for app in bulk_run.applications %}
+    <h3>Application #{{ app.id }} - {{ app.application_name }}</h3>
+    <div class="detail-block">
+        <p><span class="detail-label">Applied on:</span> {{ app.applied_on }}</p>
+        <p><span class="detail-label">Job site:</span> {{ app.job_site_name or "N/A" }}</p>
+        <p><span class="detail-label">To emails:</span> {{ app.to_emails_display }}</p>
+        <p><span class="detail-label">Subject:</span> {{ app.subject or "N/A" }}</p>
+        <p><span class="detail-label">Cover letter:</span></p>
+        <div class="cover-letter">{{ app.cover_letter or "N/A" }}</div>
+        {% if app.application_form_qa %}
+        <p><span class="detail-label">Application form Q&amp;A:</span></p>
+        {% for qa in app.application_form_qa %}
+        <p><strong>Q:</strong> {{ qa.question }}<br><strong>A:</strong> {{ qa.answer }}</p>
+        {% endfor %}
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No applications were linked to this bulk run.</p>
+    {% endif %}
+    {% endfor %}
+</body>
+</html>

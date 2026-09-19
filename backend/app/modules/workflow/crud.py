@@ -322,3 +322,23 @@ async def get_last_execution_for_workflow(
         .limit(1)
     )
     return result.scalars().first()
+
+
+async def list_bulk_job_application_ids_for_execution(
+    db: AsyncSession,
+    execution_id: int,
+) -> list[int]:
+    """Return bulk job application ids created during a workflow execution."""
+    from app.modules.workflow.models import LinkedTaskModelName
+
+    result = await db.execute(
+        select(WorkflowJob.created_resource_id)
+        .where(
+            WorkflowJob.workflow_execution_id == execution_id,
+            WorkflowJob.created_resource_type
+            == LinkedTaskModelName.BULK_JOB_APPLICATION.value,
+            WorkflowJob.created_resource_id.isnot(None),
+        )
+        .order_by(WorkflowJob.id.asc())
+    )
+    return [row[0] for row in result.all() if row[0] is not None]

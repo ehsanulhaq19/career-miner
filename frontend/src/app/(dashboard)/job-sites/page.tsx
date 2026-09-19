@@ -5,6 +5,7 @@ import {
   HiOutlinePencilSquare,
   HiOutlineTrash,
   HiOutlinePlus,
+  HiOutlineDocumentDuplicate,
   HiXMark,
 } from "react-icons/hi2";
 import { useAppDispatch, useAppSelector } from "@/store/store";
@@ -53,6 +54,7 @@ export default function JobSitesPage() {
   const [form, setForm] = useState<JobSiteFormData>(emptyForm);
   const [categoryInput, setCategoryInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -142,6 +144,28 @@ export default function JobSitesPage() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Delete failed.";
       setToast({ type: "error", text: msg });
+    }
+  };
+
+  const handleDuplicate = async (site: JobSite) => {
+    setDuplicatingId(site.id);
+    try {
+      await dispatch(
+        addJobSite({
+          name: `${site.name} (Copy)`,
+          url: site.url,
+          is_active: site.is_active,
+          scrap_duration: site.scrap_duration,
+          categories: [...site.categories],
+        })
+      ).unwrap();
+      setToast({ type: "success", text: "Job site duplicated successfully." });
+      dispatch(fetchJobSites());
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Duplicate failed.";
+      setToast({ type: "error", text: msg });
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -365,6 +389,14 @@ export default function JobSitesPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => void handleDuplicate(site)}
+                          disabled={duplicatingId === site.id}
+                          className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+                          title="Duplicate"
+                        >
+                          <HiOutlineDocumentDuplicate className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => openEditForm(site)}
                           className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"

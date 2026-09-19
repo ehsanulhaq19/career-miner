@@ -1,9 +1,12 @@
 from contextlib import asynccontextmanager
 
+import asyncio
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.core.event_loop import set_main_event_loop
 from app.core.exceptions import AppException, app_exception_handler
 from app.modules.auth.api import router as auth_router
 from app.modules.career_client.api import router as career_client_router
@@ -28,6 +31,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown events."""
+    set_main_event_loop(asyncio.get_running_loop())
     await start_scheduler()
     yield
     stop_scheduler()

@@ -175,6 +175,62 @@ class BulkJobApplicationEmailSend(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class BulkJobApplicationReportEmailStatus(str, enum.Enum):
+    """Enumeration of bulk job application report email execution states."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    ERROR = "error"
+    TERMINATED = "terminated"
+
+
+class BulkJobApplicationReportEmail(Base):
+    """
+    SQLAlchemy model representing a workflow report email run that sends a PDF
+    summary of bulk job applications from a workflow execution.
+    """
+
+    __tablename__ = "bulk_job_application_report_emails"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    send_to_email = Column(String(320), nullable=False)
+    status = Column(
+        String(50),
+        default=BulkJobApplicationReportEmailStatus.PENDING.value,
+        nullable=False,
+    )
+    report_pdf_path = Column(String(1000), nullable=True)
+    meta_data = Column(JSON, default=dict, nullable=True)
+    workflow_execution_id = Column(
+        Integer, ForeignKey("workflow_executions.id"), nullable=True
+    )
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class BulkJobApplicationReportEmailLog(Base):
+    """
+    SQLAlchemy model representing progress logs for a bulk job application report email run.
+    """
+
+    __tablename__ = "bulk_job_application_report_email_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    bulk_job_application_report_email_id = Column(
+        Integer,
+        ForeignKey("bulk_job_application_report_emails.id"),
+        nullable=False,
+    )
+    action = Column(String(255), nullable=False)
+    progress = Column(Integer, default=0, nullable=False)
+    status = Column(String(50), default="pending", nullable=False)
+    details = Column(Text, nullable=True)
+    meta_data = Column(JSON, default=dict, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class BulkJobApplicationEmailSendLog(Base):
     """
     SQLAlchemy model representing a bulk job application email send progress log.

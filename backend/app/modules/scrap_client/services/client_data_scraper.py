@@ -384,8 +384,8 @@ async def _parse_clients_via_llm(html: str) -> list[dict]:
     prompt = CLIENT_PARSER_USER_PROMPT_TEMPLATE.format(html_content=content)
     try:
         llm_client = LLMFactory.get_client(
-            provider_name="grok",
-            model_name="grok-4-1-fast-reasoning",
+            provider_name="gemini",
+            model_name="gemini-2.5-flash-lite",
         )
         response = await llm_client.generate_content(
             system_prompt=CLIENT_PARSER_SYSTEM_PROMPT,

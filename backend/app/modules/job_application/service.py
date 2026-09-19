@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 import random
 import asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -21,13 +22,20 @@ from app.modules.job_application.crud import (
     create_bulk_job_application_log,
     create_bulk_job_application_email_send,
     create_bulk_job_application_email_send_log,
+    create_bulk_job_application_report_email,
+    create_bulk_job_application_report_email_log,
     create_job_application,
     create_job_application_email_log,
     record_job_application_bulk_job_application_link,
     get_bulk_job_application_by_id,
+    get_bulk_job_applications_by_ids,
     get_bulk_job_application_logs_by_id,
     get_bulk_job_application_email_send_by_id,
+    get_bulk_job_application_report_email_by_id,
     get_bulk_job_application_email_send_logs as crud_get_bulk_email_send_logs,
+    get_bulk_job_application_report_email_logs as crud_get_bulk_report_email_logs,
+    get_job_applications_for_bulk_job_applications,
+    get_bulk_job_application_ids_by_workflow_execution,
     get_email_logs_for_job_application,
     get_email_send_count_for_job_application,
     filter_job_application_ids_by_min_similarity,
@@ -39,6 +47,7 @@ from app.modules.job_application.crud import (
     get_job_applications_by_date_and_similarity,
     update_bulk_job_application_status,
     update_bulk_job_application_email_send_status,
+    update_bulk_job_application_report_email_status,
     bulk_update_job_applications_is_active,
     update_job_application as crud_update_job_application,
 )
@@ -52,13 +61,16 @@ from app.modules.job_application.prompts import (
 )
 from app.modules.job_application.models import (
     BulkJobApplicationEmailSendStatus,
+    BulkJobApplicationReportEmailStatus,
     BulkJobApplicationStatus,
+    JobApplicationBulkJobApplicationLink,
 )
 
 _BULK_JOB_APP_HALTED_STATUSES: frozenset[str] = frozenset(
     {
         BulkJobApplicationStatus.STOPPED.value,
         BulkJobApplicationStatus.TERMINATED.value,
+        BulkJobApplicationStatus.COMPLETED.value,
     }
 )
 from app.modules.career_client.crud import create_career_client, update_career_client
@@ -66,6 +78,8 @@ from app.modules.job_application.schemas import (
     ApplicationFormQaItem,
     BulkJobApplicationEmailSendLogListResponse,
     BulkJobApplicationEmailSendLogResponse,
+    BulkJobApplicationReportEmailLogListResponse,
+    BulkJobApplicationReportEmailLogResponse,
     BulkJobApplicationLogListResponse,
     BulkJobApplicationLogResponse,
     BulkJobApplicationResponse,
@@ -115,6 +129,21 @@ LIVE_APPLICATION_SOURCE_LABEL = "Live Application"
 APPLICATION_FORM_QA_COVER_LETTER_MARKER = "Application form responses"
 
 
+def _normalize_external_url(url: str | None) -> str | None:
+    """Ensure a URL has a scheme so PDF/email links are clickable."""
+    value = (url or "").strip()
+    if not value:
+        return None
+    if value.startswith(("http://", "https://")):
+        return value
+    return f"https://{value}"
+
+
+def _cover_letter_for_report(cover_letter: str | None) -> str:
+    """Cover letter body for PDF reports (without duplicated Q&A appendix)."""
+    return _cover_letter_for_email_send(cover_letter)
+
+
 def _cover_letter_for_email_send(cover_letter: str | None) -> str:
     """Return cover letter text for outbound email, without the application form Q&A appendix."""
     text = (cover_letter or "").strip()
@@ -144,8 +173,8 @@ async def _run_live_job_extraction_llm(job_details: str) -> dict:
     """Call the LLM to extract career client and career job fields from pasted job text."""
     prompt = LIVE_JOB_APPLICATION_USER_PROMPT_TEMPLATE.format(job_details=job_details)
     llm_client = LLMFactory.get_client(
-        provider_name="grok",
-        model_name="grok-4-1-fast-reasoning",
+        provider_name="gemini",
+        model_name="gemini-2.5-flash-lite",
     )
     response = await llm_client.generate_content(
         system_prompt=LIVE_JOB_APPLICATION_SYSTEM_PROMPT,
@@ -181,8 +210,8 @@ async def _generate_application_form_answers(
         questions_json=questions_json,
     )
     llm_client = LLMFactory.get_client(
-        provider_name="grok",
-        model_name="grok-4-1-fast-reasoning",
+        provider_name="gemini",
+        model_name="gemini-2.5-flash-lite",
     )
     response = await llm_client.generate_content(
         system_prompt=PREPARE_JOB_APPLICATION_FORM_SYSTEM_PROMPT,
@@ -278,7 +307,7 @@ async def _create_job_application_pdf(
     filename = f"{application_name}.pdf"
     output_path = base_dir / filename
     html_content = _render_resume_html(resume_content)
-    _html_to_pdf(html_content, output_path)
+    await asyncio.to_thread(_html_to_pdf, html_content, output_path)
     return str(output_path.relative_to(Path(os.getcwd())))
 
 
@@ -334,8 +363,8 @@ async def create_job_application_flow(
     )
 
     llm_client = LLMFactory.get_client(
-        provider_name="grok",
-        model_name="grok-4-1-fast-reasoning",
+        provider_name="gemini",
+        model_name="gemini-2.5-flash-lite",
     )
     response = await llm_client.generate_content(
         system_prompt=JOB_APPLICATION_SYSTEM_PROMPT,
@@ -978,13 +1007,18 @@ async def run_bulk_job_application_background(
 
                 try:
                     async with async_session() as app_db:
-                        await create_job_application_flow(
+                        ja_resp = await create_job_application_flow(
                             app_db,
                             career_job_id=career_job_id,
                             resume_id=resume_id,
                             user_id=user_id,
                         )
                         await app_db.commit()
+                    await record_job_application_bulk_job_application_link(
+                        db,
+                        ja_resp.id,
+                        bulk_job_application_id,
+                    )
                     created_count += 1
                     await _create_bulk_log_and_broadcast(
                         db,
@@ -994,7 +1028,12 @@ async def run_bulk_job_application_background(
                         progress=int(((idx + 1) / total) * 100) if total > 0 else 100,
                         status="completed",
                         details=f"Created job application for job {career_job_id}",
-                        meta_data={"career_job_id": career_job_id, "job_application_index": idx + 1, "total": total},
+                        meta_data={
+                            "career_job_id": career_job_id,
+                            "job_application_id": ja_resp.id,
+                            "job_application_index": idx + 1,
+                            "total": total,
+                        },
                     )
                 except Exception:
                     failed_count += 1
@@ -1243,7 +1282,7 @@ async def start_bulk_job_application_email_send(
     db: AsyncSession,
     job_application_ids: list[int],
     user_id: int,
-    min_similarity_score: float | None = None,
+    min_similarity_score: float | None = 80.0,
     workflow_execution_id: int | None = None,
 ) -> dict:
     """
@@ -1446,6 +1485,397 @@ async def get_bulk_job_application_email_send_logs(
     return BulkJobApplicationEmailSendLogListResponse(
         items=[
             BulkJobApplicationEmailSendLogResponse.model_validate(log)
+            for log in logs
+        ]
+    )
+
+
+def _get_bulk_job_application_report_base_dir() -> Path:
+    """Return the base directory for bulk job application report PDFs."""
+    settings = get_settings()
+    base = Path(settings.BULK_JOB_APPLICATION_REPORT_FOLDER)
+    if not base.is_absolute():
+        base = Path(os.getcwd()) / base
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _render_bulk_applications_report_html(report: dict) -> str:
+    """Render the bulk applications report HTML from template."""
+    from jinja2 import Environment, FileSystemLoader
+
+    templates_dir = Path(__file__).resolve().parent.parent.parent / "templates"
+    env = Environment(loader=FileSystemLoader(str(templates_dir)))
+    template = env.get_template("reports/bulk_job_applications_report.html")
+    return template.render(report=report)
+
+
+def _generate_bulk_applications_report_pdf(report: dict, filename: str) -> str:
+    """Generate a PDF report and return its relative path."""
+    base_dir = _get_bulk_job_application_report_base_dir()
+    output_path = base_dir / filename
+    html_content = _render_bulk_applications_report_html(report)
+    _html_to_pdf(html_content, output_path)
+    return str(output_path.relative_to(Path(os.getcwd())))
+
+
+def _normalize_report_email(value: str) -> str:
+    """Validate and normalize a report recipient email."""
+    email = (value or "").strip()
+    if not email or "@" not in email:
+        raise BadRequestException(detail="send_to_email must be a valid email address")
+    return email
+
+
+async def _resolve_bulk_job_application_ids_for_report(
+    data: dict,
+    context: dict,
+    execution_id: int,
+    user_id: int,
+) -> list[int]:
+    """Resolve which bulk job application runs to include in the report."""
+    from app.modules.workflow import crud as workflow_crud
+
+    explicit_ids = [
+        int(x)
+        for x in (data.get("bulk_job_application_ids") or [])
+        if isinstance(x, (int, float, str)) and str(x).strip().isdigit()
+    ]
+    if explicit_ids:
+        return explicit_ids
+
+    use_previous = data.get("use_previous_bulk_job_applications")
+    if use_previous is True or str(use_previous).lower() in ("1", "true", "yes"):
+        ctx_ids = context.get("bulk_job_application_ids") or []
+        if isinstance(ctx_ids, list) and ctx_ids:
+            return [int(x) for x in ctx_ids if x is not None]
+
+    use_execution = data.get("use_execution_bulk_jobs", True)
+    if use_execution is False or str(use_execution).lower() in ("0", "false", "no"):
+        return []
+
+    async with async_session() as db:
+        execution_ids = await workflow_crud.list_bulk_job_application_ids_for_execution(
+            db, execution_id
+        )
+        if execution_ids:
+            return execution_ids
+        return await get_bulk_job_application_ids_by_workflow_execution(
+            db, execution_id, user_id
+        )
+    return []
+
+
+async def _build_bulk_applications_report_data(
+    db: AsyncSession,
+    bulk_job_application_ids: list[int],
+    user_id: int,
+    workflow_execution_id: int,
+    send_to_email: str,
+) -> dict:
+    """Build structured report data for PDF rendering."""
+    from datetime import datetime, timezone
+
+    bulk_runs = await get_bulk_job_applications_by_ids(
+        db, bulk_job_application_ids, user_id
+    )
+    bulk_run_by_id = {row.id: row for row in bulk_runs}
+    ordered_bulk_runs = [
+        bulk_run_by_id[bid]
+        for bid in bulk_job_application_ids
+        if bid in bulk_run_by_id
+    ]
+
+    applications = await get_job_applications_for_bulk_job_applications(
+        db, bulk_job_application_ids, user_id
+    )
+    apps_by_bulk: dict[int, list] = {bid: [] for bid in bulk_job_application_ids}
+    bulk_career_job_ids: dict[int, set[int]] = {}
+    for bulk_run in ordered_bulk_runs:
+        raw_ids = (bulk_run.meta_data or {}).get("career_job_ids") or []
+        bulk_career_job_ids[bulk_run.id] = {
+            int(x)
+            for x in raw_ids
+            if isinstance(x, (int, float, str)) and str(x).strip().isdigit()
+        }
+
+    for app in applications:
+        enriched = await _enrich_job_application_response(db, app)
+        career_job = await get_career_job_by_id(db, app.career_job_id)
+        career_client = None
+        if career_job and career_job.career_client_id:
+            career_client = await get_career_client_by_id(db, career_job.career_client_id)
+        app_payload = {
+            "id": enriched.id,
+            "application_name": enriched.application_name,
+            "career_job_title": enriched.career_job_title,
+            "career_job_url": _normalize_external_url(
+                career_job.url if career_job else None
+            ),
+            "career_client_name": enriched.career_client_name,
+            "career_client_url": _normalize_external_url(
+                career_client.official_website if career_client else None
+            ),
+            "job_site_name": enriched.job_site_name,
+            "similarity_score": enriched.similarity_score,
+            "subject": enriched.subject,
+            "cover_letter": _cover_letter_for_report(enriched.cover_letter),
+            "is_email_send": enriched.is_email_send,
+            "email_send_count": enriched.email_send_count or 0,
+            "to_emails_display": ", ".join(enriched.to_emails or []) or "N/A",
+            "applied_on": (
+                enriched.applied_on.isoformat(sep=" ", timespec="seconds")
+                if enriched.applied_on
+                else "N/A"
+            ),
+            "application_form_qa": [
+                {"question": qa.question, "answer": qa.answer}
+                for qa in (enriched.application_form_qa or [])
+            ],
+        }
+        link_result = await db.execute(
+            select(JobApplicationBulkJobApplicationLink.bulk_job_application_id).where(
+                JobApplicationBulkJobApplicationLink.job_application_id == app.id,
+                JobApplicationBulkJobApplicationLink.bulk_job_application_id.in_(
+                    bulk_job_application_ids
+                ),
+            )
+        )
+        linked_bulk_ids = [bulk_id for (bulk_id,) in link_result.all()]
+        if linked_bulk_ids:
+            for bulk_id in linked_bulk_ids:
+                apps_by_bulk.setdefault(bulk_id, []).append(app_payload)
+            continue
+
+        for bulk_id, career_job_ids in bulk_career_job_ids.items():
+            if app.career_job_id in career_job_ids:
+                apps_by_bulk.setdefault(bulk_id, []).append(app_payload)
+
+    bulk_run_payloads = []
+    for bulk_run in ordered_bulk_runs:
+        resume = await get_resume_by_id(db, bulk_run.resume_id, user_id)
+        bulk_run_payloads.append(
+            {
+                "id": bulk_run.id,
+                "name": bulk_run.name,
+                "status": bulk_run.status,
+                "resume_name": resume.name if resume else None,
+                "created_at": (
+                    bulk_run.created_at.isoformat(sep=" ", timespec="seconds")
+                    if bulk_run.created_at
+                    else "N/A"
+                ),
+                "applications": apps_by_bulk.get(bulk_run.id, []),
+            }
+        )
+
+    application_count = sum(len(r["applications"]) for r in bulk_run_payloads)
+    return {
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "workflow_execution_id": workflow_execution_id,
+        "send_to_email": send_to_email,
+        "summary": {
+            "bulk_run_count": len(bulk_run_payloads),
+            "application_count": application_count,
+        },
+        "bulk_runs": bulk_run_payloads,
+    }
+
+
+async def _create_bulk_report_log(
+    db: AsyncSession,
+    report_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "in_progress",
+    details: str | None = None,
+    meta_data: dict | None = None,
+) -> None:
+    """Persist a report email progress log."""
+    await create_bulk_job_application_report_email_log(
+        db,
+        bulk_job_application_report_email_id=report_id,
+        action=action,
+        progress=progress,
+        status=status,
+        details=details,
+        meta_data=meta_data,
+    )
+
+
+async def start_bulk_job_application_report_email(
+    db: AsyncSession,
+    send_to_email: str,
+    bulk_job_application_ids: list[int],
+    user_id: int,
+    workflow_execution_id: int | None = None,
+) -> dict:
+    """Create a bulk job application report email record."""
+    if not bulk_job_application_ids:
+        raise BadRequestException(
+            detail="No bulk job applications found for this workflow execution"
+        )
+    recipient = _normalize_report_email(send_to_email)
+    meta_data = {
+        "bulk_job_application_ids": bulk_job_application_ids,
+        "total_bulk_runs": len(bulk_job_application_ids),
+    }
+    report_data: dict = {
+        "user_id": user_id,
+        "send_to_email": recipient,
+        "status": BulkJobApplicationReportEmailStatus.PENDING.value,
+        "meta_data": meta_data,
+    }
+    if workflow_execution_id is not None:
+        report_data["workflow_execution_id"] = workflow_execution_id
+    report = await create_bulk_job_application_report_email(db, report_data)
+    return {"id": report.id, "status": report.status}
+
+
+async def run_bulk_job_application_report_email(
+    report_id: int,
+    bulk_job_application_ids: list[int],
+    user_id: int,
+    send_to_email: str,
+    workflow_execution_id: int,
+) -> None:
+    """Generate the PDF report and email it to the configured recipient."""
+    recipient = _normalize_report_email(send_to_email)
+    async with async_session() as db:
+        try:
+            report = await get_bulk_job_application_report_email_by_id(db, report_id)
+            if report is None:
+                return
+
+            await update_bulk_job_application_report_email_status(
+                db, report_id, BulkJobApplicationReportEmailStatus.IN_PROGRESS
+            )
+            await _create_bulk_report_log(
+                db,
+                report_id,
+                "report_started",
+                progress=0,
+                details=f"Building report for {len(bulk_job_application_ids)} bulk runs",
+                meta_data={"bulk_job_application_ids": bulk_job_application_ids},
+            )
+            await db.commit()
+
+            report_data = await _build_bulk_applications_report_data(
+                db,
+                bulk_job_application_ids,
+                user_id,
+                workflow_execution_id,
+                recipient,
+            )
+            filename = (
+                f"bulk_job_applications_report_exec_{workflow_execution_id}_"
+                f"{report_id}.pdf"
+            )
+            pdf_path = await asyncio.to_thread(
+                _generate_bulk_applications_report_pdf, report_data, filename
+            )
+
+            await _create_bulk_report_log(
+                db,
+                report_id,
+                "report_pdf_generated",
+                progress=60,
+                details=f"Report PDF generated at {pdf_path}",
+                meta_data={
+                    "report_pdf_path": pdf_path,
+                    "application_count": report_data["summary"]["application_count"],
+                },
+            )
+
+            report_row = await get_bulk_job_application_report_email_by_id(db, report_id)
+            if report_row is not None:
+                report_row.report_pdf_path = pdf_path
+                meta = dict(report_row.meta_data or {})
+                meta.update(
+                    {
+                        "application_count": report_data["summary"]["application_count"],
+                        "bulk_run_count": report_data["summary"]["bulk_run_count"],
+                    }
+                )
+                report_row.meta_data = meta
+                await db.flush()
+
+            subject = (
+                f"Bulk Job Applications Report - Workflow #{workflow_execution_id}"
+            )
+            content = (
+                "Attached is the PDF report summarizing all bulk job applications "
+                f"created during workflow execution #{workflow_execution_id}.\n\n"
+                f"Bulk runs: {report_data['summary']['bulk_run_count']}\n"
+                f"Applications: {report_data['summary']['application_count']}"
+            )
+            email_service = EmailService()
+            send_result = await email_service.send_email(
+                recipient=recipient,
+                subject=subject,
+                content=content,
+                attachment_path=pdf_path,
+                raise_on_failure=True,
+            )
+
+            await update_bulk_job_application_report_email_status(
+                db, report_id, BulkJobApplicationReportEmailStatus.COMPLETED
+            )
+            await _create_bulk_report_log(
+                db,
+                report_id,
+                "report_email_sent",
+                progress=100,
+                status="completed",
+                details=f"Report emailed to {recipient}",
+                meta_data={
+                    "email_log_id": send_result.get("email_log_id"),
+                    "send_to_email": recipient,
+                    "report_pdf_path": pdf_path,
+                },
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            try:
+                async with async_session() as err_db:
+                    await update_bulk_job_application_report_email_status(
+                        err_db,
+                        report_id,
+                        BulkJobApplicationReportEmailStatus.ERROR,
+                    )
+                    await _create_bulk_report_log(
+                        err_db,
+                        report_id,
+                        "report_failed",
+                        progress=100,
+                        status="error",
+                        details="Failed to generate or send report email",
+                    )
+                    await err_db.commit()
+            except Exception:
+                pass
+            raise
+
+
+async def get_bulk_job_application_report_email_logs(
+    db: AsyncSession,
+    bulk_job_application_report_email_id: int,
+    user_id: int,
+) -> BulkJobApplicationReportEmailLogListResponse:
+    """Return all logs for a bulk job application report email run."""
+    report = await get_bulk_job_application_report_email_by_id(
+        db, bulk_job_application_report_email_id
+    )
+    if report is None or report.user_id != user_id:
+        raise NotFoundException(detail="Bulk report email not found")
+
+    logs = await crud_get_bulk_report_email_logs(
+        db, bulk_job_application_report_email_id
+    )
+    return BulkJobApplicationReportEmailLogListResponse(
+        items=[
+            BulkJobApplicationReportEmailLogResponse.model_validate(log)
             for log in logs
         ]
     )

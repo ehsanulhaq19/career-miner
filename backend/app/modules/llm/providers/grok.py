@@ -25,7 +25,7 @@ class GrokLLMClient(BaseLLMClient):
         Initialize the Grok client with the specified model.
 
         Args:
-            model_name: The Grok model identifier (e.g., grok-4-1-fast-reasoning).
+            model_name: The Grok model identifier (e.g., grok-4.3).
         """
         self.model_name = model_name
         config = get_provider_config("grok")

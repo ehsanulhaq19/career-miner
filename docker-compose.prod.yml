@@ -8,12 +8,21 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: careerminer
+      POSTGRES_APP_USER: admin
+      POSTGRES_APP_PASSWORD: admin
+    # Do not bind 0.0.0.0 — an exposed Postgres with default creds gets exploited within hours.
+    # Backend reaches the DB via the docker network (db:5432). Localhost mapping is optional.
     ports:
-      - "5436:5432"
+      - "127.0.0.1:5436:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-entrypoint-wrap.sh:/usr/local/bin/postgres-entrypoint-wrap.sh:ro
+      - ./docker/postgres/ensure-app-user.sh:/usr/local/bin/ensure-app-user.sh:ro
+      - ./docker/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-entrypoint-wrap.sh"]
+    command: ["postgres"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres && psql -U postgres -d careerminer -c 'SELECT 1' >/dev/null"]
       interval: 5s
       timeout: 5s
       retries: 5

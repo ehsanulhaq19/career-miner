@@ -255,8 +255,8 @@ async def send_career_client_outreach_email(
     )
 
     llm_client = LLMFactory.get_client(
-        provider_name="grok",
-        model_name="grok-4-1-fast-reasoning",
+        provider_name="gemini",
+        model_name="gemini-2.5-flash-lite",
     )
     response = await llm_client.generate_content(
         system_prompt=CAREER_CLIENT_OUTREACH_SYSTEM_PROMPT,

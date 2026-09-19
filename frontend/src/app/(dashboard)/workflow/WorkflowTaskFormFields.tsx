@@ -475,6 +475,86 @@ export default function WorkflowTaskFormFields({
         </div>
       )}
 
+      {row.linked_task_model === "BulkJobApplicationReportEmail" && (
+        <div className="space-y-3 pt-1 border-t border-gray-100 dark:border-gray-800">
+          <label className="block text-sm">
+            <span className={labelClass}>Send report to email</span>
+            <p className={hintClass}>
+              The PDF summary of all bulk job applications from this workflow
+              execution will be sent to this address.
+            </p>
+            <input
+              type="email"
+              className={inputClass}
+              value={row.send_to_email}
+              placeholder="you@example.com"
+              onChange={(e) =>
+                onChange({ ...row, send_to_email: e.target.value })
+              }
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={row.use_execution_bulk_jobs}
+              disabled={row.use_previous_bulk_job_applications}
+              onChange={(e) =>
+                onChange({
+                  ...row,
+                  use_execution_bulk_jobs: e.target.checked,
+                  bulk_job_application_ids_input: e.target.checked
+                    ? ""
+                    : row.bulk_job_application_ids_input,
+                })
+              }
+            />
+            Include all bulk job runs created in this workflow execution
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={row.use_previous_bulk_job_applications}
+              onChange={(e) =>
+                onChange({
+                  ...row,
+                  use_previous_bulk_job_applications: e.target.checked,
+                  use_execution_bulk_jobs: e.target.checked
+                    ? false
+                    : row.use_execution_bulk_jobs,
+                  bulk_job_application_ids_input: e.target.checked
+                    ? ""
+                    : row.bulk_job_application_ids_input,
+                })
+              }
+            />
+            Use bulk job runs from previous workflow steps
+          </label>
+          {!row.use_execution_bulk_jobs &&
+            !row.use_previous_bulk_job_applications && (
+              <label className="block text-sm">
+                <span className={labelClass}>
+                  Bulk job application IDs (optional override)
+                </span>
+                <p className={hintClass}>
+                  Comma-separated bulk run IDs. Leave empty when using execution
+                  or previous-step bulk runs.
+                </p>
+                <input
+                  className={inputClass}
+                  value={row.bulk_job_application_ids_input}
+                  placeholder="e.g. 12, 15"
+                  onChange={(e) =>
+                    onChange({
+                      ...row,
+                      bulk_job_application_ids_input: e.target.value,
+                    })
+                  }
+                />
+              </label>
+            )}
+        </div>
+      )}
+
       {onRemove ? (
         <button
           type="button"

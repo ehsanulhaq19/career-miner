@@ -62,10 +62,35 @@ async def _terminate_timed_out_jobs(db) -> None:
         await update_last_scrapped(db, job.job_site_id, datetime.now(timezone.utc).replace(tzinfo=None))
 
 
+async def _scrape_site_background(job_site_id: int, scrap_job_id: int) -> None:
+    """Run a scheduled scrape without blocking the cron job or API event loop."""
+    async with async_session() as db:
+        from app.modules.job_site.crud import get_job_site_by_id
+        from app.modules.scrap_job.crud import get_scrap_job_by_id
+
+        job_site = await get_job_site_by_id(db, job_site_id)
+        scrap_job = await get_scrap_job_by_id(db, scrap_job_id)
+        if job_site is None or scrap_job is None:
+            return
+        scraper = ScraperService()
+        try:
+            await scraper.scrape_job_site(db, job_site, scrap_job)
+            await update_last_scrapped(
+                db, job_site_id, datetime.now(timezone.utc).replace(tzinfo=None)
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "Background scrape failed for site %s (job %d)",
+                job_site_id,
+                scrap_job_id,
+            )
+
+
 async def _process_eligible_sites(db) -> None:
     """Scrape all eligible job sites that have no active scrap jobs."""
     job_sites = await get_active_job_sites_for_scraping(db)
-    scraper = ScraperService()
     for job_site in job_sites:
         active_jobs = await get_active_scrap_jobs_for_site(
             db, job_site.id, created_by=job_site.created_by
@@ -91,8 +116,9 @@ async def _process_eligible_sites(db) -> None:
             scrap_job.id,
             job_site.name,
         )
-        await scraper.scrape_job_site(db, job_site, scrap_job)
-        await update_last_scrapped(db, job_site.id, datetime.now(timezone.utc).replace(tzinfo=None))
+        asyncio.create_task(
+            _scrape_site_background(job_site.id, scrap_job.id)
+        )
 
 
 async def start_scheduler() -> None:

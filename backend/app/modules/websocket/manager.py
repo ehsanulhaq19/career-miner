@@ -5,6 +5,8 @@ from collections import defaultdict
 
 from fastapi import WebSocket
 
+from app.core.event_loop import run_on_main_loop
+
 
 class ConnectionManager:
     """Manages WebSocket connections and broadcasts messages to channels."""
@@ -42,6 +44,16 @@ class ConnectionManager:
         Send a JSON message to all connections in the specified channel.
         Message format: {"type": message_type, "data": data}
         """
+        await run_on_main_loop(
+            self._send_to_channel(channel, message_type, data)
+        )
+
+    async def _send_to_channel(
+        self,
+        channel: str,
+        message_type: str,
+        data: dict,
+    ) -> None:
         message = json.dumps({"type": message_type, "data": data})
         disconnected = set()
         for connection in self._channels.get(channel, set()):
@@ -62,6 +74,16 @@ class ConnectionManager:
         Send a JSON message to all channels that start with the given prefix.
         Used for broadcasting to /ws/scrap_job/* channels.
         """
+        await run_on_main_loop(
+            self._broadcast_to_channel_prefix(channel_prefix, message_type, data)
+        )
+
+    async def _broadcast_to_channel_prefix(
+        self,
+        channel_prefix: str,
+        message_type: str,
+        data: dict,
+    ) -> None:
         message = json.dumps({"type": message_type, "data": data})
         disconnected: list[tuple[str, WebSocket]] = []
         for channel, connections in list(self._channels.items()):

@@ -23,7 +23,7 @@ export default function BulkEmailSendModal({
 }: BulkEmailSendModalProps) {
   const dispatch = useAppDispatch();
   const { logsByBulkId } = useAppSelector((state) => state.bulkEmailSend);
-  const [minSimilarityScore, setMinSimilarityScore] = useState(0);
+  const [minSimilarityScore, setMinSimilarityScore] = useState(80);
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
     return d.toISOString().slice(0, 10);

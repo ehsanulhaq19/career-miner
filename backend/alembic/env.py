@@ -30,6 +30,8 @@ from app.modules.job_application.models import (  # noqa: F401
     BulkJobApplicationEmailSend,
     BulkJobApplicationEmailSendLog,
     BulkJobApplicationLog,
+    BulkJobApplicationReportEmail,
+    BulkJobApplicationReportEmailLog,
     JobApplication,
     JobApplicationBulkJobApplicationLink,
     JobApplicationEmailLog,

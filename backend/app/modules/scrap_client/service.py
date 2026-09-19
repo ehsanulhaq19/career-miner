@@ -33,7 +33,11 @@ from app.modules.scrap_client.crud import (
 from app.modules.scrap_client.models import ScrapClientJobStatus
 
 _SCRAP_CLIENT_HALTED_STATUSES: frozenset[str] = frozenset(
-    {ScrapClientJobStatus.STOPPED.value, ScrapClientJobStatus.TERMINATED.value}
+    {
+        ScrapClientJobStatus.STOPPED.value,
+        ScrapClientJobStatus.TERMINATED.value,
+        ScrapClientJobStatus.COMPLETED.value,
+    }
 )
 from app.modules.scrap_client.schemas import (
     ScrapClientDetailsStartRequest,

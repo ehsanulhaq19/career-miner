@@ -1,4 +1,5 @@
 import asyncio
+import asyncio
 import json
 import logging
 import re
@@ -30,7 +31,11 @@ from app.modules.scrap_job.models import ScrapJob, ScrapJobStatus
 
 # STOPPED (user) or TERMINATED (e.g. timeout): runner exits without marking COMPLETED.
 _SCRAP_JOB_HALTED_STATUSES: frozenset[str] = frozenset(
-    {ScrapJobStatus.STOPPED.value, ScrapJobStatus.TERMINATED.value}
+    {
+        ScrapJobStatus.STOPPED.value,
+        ScrapJobStatus.TERMINATED.value,
+        ScrapJobStatus.COMPLETED.value,
+    }
 )
 from app.modules.scrap_job.schemas import ScrapJobResponse
 from app.modules.scraper.prompts import (
@@ -342,7 +347,12 @@ class ScraperService:
                         details=f"Extracting links from page {pages_scraped + 1}",
                         meta_data={"url": final_url},
                     )
-                    crawlable_links = self._extract_crawlable_links(html, final_url, base_domain)
+                    crawlable_links = await asyncio.to_thread(
+                        self._extract_crawlable_links,
+                        html,
+                        final_url,
+                        base_domain,
+                    )
                     next_depth = current_depth + 1
                     can_follow_links = depth_levels is None or next_depth <= depth_levels
                     for link in crawlable_links:
@@ -560,6 +570,13 @@ class ScraperService:
         self, html: str, base_url: str
     ) -> list[dict]:
         """Extract job listings from HTML content using common patterns."""
+        return await asyncio.to_thread(
+            self._extract_jobs_from_html_sync, html, base_url
+        )
+
+    def _extract_jobs_from_html_sync(
+        self, html: str, base_url: str
+    ) -> list[dict]:
         soup = BeautifulSoup(html, "html.parser")
         jobs: list[dict] = []
 
@@ -585,8 +602,8 @@ class ScraperService:
             return
         chunk_size = 5
         llm_client = LLMFactory.get_client(
-            provider_name="grok",
-            model_name="grok-4-1-fast-reasoning",
+            provider_name="gemini",
+            model_name="gemini-2.5-flash-lite",
         )
         for i in range(0, len(jobs), chunk_size):
             refreshed = await get_scrap_job_by_id(db, scrap_job_id)

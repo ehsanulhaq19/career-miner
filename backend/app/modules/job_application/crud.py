@@ -11,6 +11,9 @@ from app.modules.job_application.models import (
     BulkJobApplicationEmailSend,
     BulkJobApplicationEmailSendLog,
     BulkJobApplicationEmailSendStatus,
+    BulkJobApplicationReportEmail,
+    BulkJobApplicationReportEmailLog,
+    BulkJobApplicationReportEmailStatus,
     BulkJobApplicationStatus,
     JobApplication,
     JobApplicationBulkJobApplicationLink,
@@ -660,6 +663,201 @@ async def update_bulk_job_application_email_send_status(
     status_value = (
         status.value
         if isinstance(status, BulkJobApplicationEmailSendStatus)
+        else status
+    )
+    record.status = status_value
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+async def get_job_applications_for_bulk_job_applications(
+    db: AsyncSession,
+    bulk_job_application_ids: list[int],
+    user_id: int,
+) -> list[JobApplication]:
+    """
+    Return job applications linked to any of the given bulk job application runs.
+
+    Uses the pivot table first. When a bulk run has no links (legacy runs), falls back
+    to the latest job application per career job listed in the bulk run meta_data.
+    """
+    if not bulk_job_application_ids:
+        return []
+
+    result = await db.execute(
+        select(JobApplication)
+        .join(
+            JobApplicationBulkJobApplicationLink,
+            JobApplicationBulkJobApplicationLink.job_application_id
+            == JobApplication.id,
+        )
+        .where(
+            JobApplicationBulkJobApplicationLink.bulk_job_application_id.in_(
+                bulk_job_application_ids
+            ),
+            JobApplication.user_id == user_id,
+            JobApplication.created_by == user_id,
+        )
+        .order_by(JobApplication.id.asc())
+    )
+    linked_apps = list(result.scalars().unique().all())
+    if linked_apps:
+        return linked_apps
+
+    bulk_runs = await get_bulk_job_applications_by_ids(
+        db, bulk_job_application_ids, user_id
+    )
+    fallback_app_ids: set[int] = set()
+    fallback_apps: list[JobApplication] = []
+    for bulk_run in bulk_runs:
+        career_job_ids = (bulk_run.meta_data or {}).get("career_job_ids") or []
+        if not isinstance(career_job_ids, list) or not career_job_ids:
+            continue
+        ids = [
+            int(x)
+            for x in career_job_ids
+            if isinstance(x, (int, float, str)) and str(x).strip().isdigit()
+        ]
+        if not ids:
+            continue
+        fallback_result = await db.execute(
+            select(JobApplication)
+            .where(
+                JobApplication.user_id == user_id,
+                JobApplication.created_by == user_id,
+                JobApplication.career_job_id.in_(ids),
+            )
+            .order_by(JobApplication.career_job_id.asc(), JobApplication.id.desc())
+        )
+        seen_career_jobs: set[int] = set()
+        for app in fallback_result.scalars().all():
+            if app.career_job_id in seen_career_jobs:
+                continue
+            if bulk_run.created_at is not None and app.created_at is not None:
+                if app.created_at < bulk_run.created_at:
+                    continue
+            seen_career_jobs.add(app.career_job_id)
+            if app.id not in fallback_app_ids:
+                fallback_app_ids.add(app.id)
+                fallback_apps.append(app)
+
+    return sorted(fallback_apps, key=lambda row: row.id)
+
+
+async def get_bulk_job_applications_by_ids(
+    db: AsyncSession,
+    bulk_job_application_ids: list[int],
+    user_id: int,
+) -> list[BulkJobApplication]:
+    """Return bulk job application rows owned by the user."""
+    if not bulk_job_application_ids:
+        return []
+    result = await db.execute(
+        select(BulkJobApplication)
+        .where(
+            BulkJobApplication.id.in_(bulk_job_application_ids),
+            BulkJobApplication.user_id == user_id,
+        )
+        .order_by(BulkJobApplication.id.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_bulk_job_application_ids_by_workflow_execution(
+    db: AsyncSession,
+    workflow_execution_id: int,
+    user_id: int,
+) -> list[int]:
+    """Return bulk job application ids linked directly to a workflow execution."""
+    result = await db.execute(
+        select(BulkJobApplication.id)
+        .where(
+            BulkJobApplication.workflow_execution_id == workflow_execution_id,
+            BulkJobApplication.user_id == user_id,
+        )
+        .order_by(BulkJobApplication.id.asc())
+    )
+    return [row[0] for row in result.all()]
+
+
+async def create_bulk_job_application_report_email(
+    db: AsyncSession,
+    data: dict,
+) -> BulkJobApplicationReportEmail:
+    """Create a bulk job application report email record."""
+    record = BulkJobApplicationReportEmail(**data)
+    db.add(record)
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+async def get_bulk_job_application_report_email_by_id(
+    db: AsyncSession,
+    report_id: int,
+) -> BulkJobApplicationReportEmail | None:
+    """Retrieve a bulk job application report email by id."""
+    result = await db.execute(
+        select(BulkJobApplicationReportEmail).where(
+            BulkJobApplicationReportEmail.id == report_id
+        )
+    )
+    return result.scalars().first()
+
+
+async def create_bulk_job_application_report_email_log(
+    db: AsyncSession,
+    bulk_job_application_report_email_id: int,
+    action: str,
+    progress: int = 0,
+    status: str = "pending",
+    details: str | None = None,
+    meta_data: dict | None = None,
+) -> BulkJobApplicationReportEmailLog:
+    """Create a progress log for a report email run."""
+    log = BulkJobApplicationReportEmailLog(
+        bulk_job_application_report_email_id=bulk_job_application_report_email_id,
+        action=action,
+        progress=progress,
+        status=status,
+        details=details,
+        meta_data=meta_data or {},
+    )
+    db.add(log)
+    await db.flush()
+    await db.refresh(log)
+    return log
+
+
+async def get_bulk_job_application_report_email_logs(
+    db: AsyncSession,
+    bulk_job_application_report_email_id: int,
+) -> list[BulkJobApplicationReportEmailLog]:
+    """Return logs for a report email run."""
+    result = await db.execute(
+        select(BulkJobApplicationReportEmailLog)
+        .where(
+            BulkJobApplicationReportEmailLog.bulk_job_application_report_email_id
+            == bulk_job_application_report_email_id
+        )
+        .order_by(BulkJobApplicationReportEmailLog.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def update_bulk_job_application_report_email_status(
+    db: AsyncSession,
+    report_id: int,
+    status: str | BulkJobApplicationReportEmailStatus,
+) -> BulkJobApplicationReportEmail | None:
+    """Update the status of a report email run."""
+    record = await get_bulk_job_application_report_email_by_id(db, report_id)
+    if record is None:
+        return None
+    status_value = (
+        status.value
+        if isinstance(status, BulkJobApplicationReportEmailStatus)
         else status
     )
     record.status = status_value

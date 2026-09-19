@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
     MAX_SCRAP_EXECUTION_TIME_MINUTES: int = 100
+    WORKFLOW_TASK_TIMEOUT_MINUTES: int = 5
     MAX_PAGES_PER_SCRAP: int = 100
     CRAWL_DELAY_MIN_SECONDS: float = 0.5
     CRAWL_DELAY_MAX_SECONDS: float = 2.0
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     RESUME_UPLOAD_FOLDER: str = "uploads/resumes"
     JOB_APPLICATION_OUTPUT_FOLDER: str = "temp/job_application/resume"
+    BULK_JOB_APPLICATION_REPORT_FOLDER: str = "temp/job_application/reports"
     SCRAP_HTML_OUTPUT_FOLDER: str = "temp/scrap_html"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

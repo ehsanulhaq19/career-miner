@@ -39,6 +39,24 @@ import {
 
 type WorkflowTab = "workflows" | "executions";
 
+function formatWorkflowJobStats(
+  resourceType: string | null | undefined,
+  fetched: number | null | undefined,
+  validated: number | null | undefined,
+  created: number | null | undefined
+): string | null {
+  if (fetched == null && validated == null && created == null) {
+    return null;
+  }
+  const f = fetched ?? "—";
+  const v = validated ?? "—";
+  const c = created ?? "—";
+  if (resourceType === "BulkJobApplicationReportEmail") {
+    return `· Bulk runs ${f} · Applications in report ${c}`;
+  }
+  return `· Fetched ${f} · Validated ${v} · Created ${c}`;
+}
+
 export default function WorkflowPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -790,25 +808,15 @@ export default function WorkflowPage() {
                           · {j.created_resource_type} #{j.created_resource_id}
                         </span>
                       )}
-                      {(j.total_records_fetched != null ||
-                        j.records_validated != null ||
-                        j.created_records_count != null) && (
-                        <span>
-                          {" "}
-                          · Fetched{" "}
-                          {j.total_records_fetched != null
-                            ? j.total_records_fetched
-                            : "—"}{" "}
-                          · Validated{" "}
-                          {j.records_validated != null
-                            ? j.records_validated
-                            : "—"}{" "}
-                          · Created{" "}
-                          {j.created_records_count != null
-                            ? j.created_records_count
-                            : "—"}
-                        </span>
-                      )}
+                      {(() => {
+                        const statsLabel = formatWorkflowJobStats(
+                          j.created_resource_type,
+                          j.total_records_fetched,
+                          j.records_validated,
+                          j.created_records_count
+                        );
+                        return statsLabel ? <span> {statsLabel}</span> : null;
+                      })()}
                       {j.error_detail && (
                         <span className="text-red-600"> · {j.error_detail}</span>
                       )}
@@ -825,14 +833,20 @@ export default function WorkflowPage() {
                           const key = `${execDetail.workflow_id}-${j.task_priority}`;
                           setRunFromPriorityBusyKey(key);
                           try {
-                            await dispatch(
+                            const result = await dispatch(
                               runWorkflowFromPriority({
                                 workflowId: execDetail.workflow_id,
                                 fromPriority: j.task_priority as number,
                                 sourceExecutionId: execDetail.id,
                               })
                             ).unwrap();
+                            setTab("executions");
                             await dispatch(fetchWorkflowExecutions());
+                            if (result.execution_id != null) {
+                              await dispatch(
+                                fetchWorkflowExecutionDetail(result.execution_id)
+                              );
+                            }
                           } finally {
                             setRunFromPriorityBusyKey(null);
                           }

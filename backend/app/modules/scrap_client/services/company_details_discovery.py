@@ -36,7 +36,7 @@ MAX_FETCH_URLS = 6
 MAX_CHARS_PER_PAGE = 12_000
 MAX_TOTAL_GROK_CONTEXT = 48_000
 GROK_DETAIL_PROVIDER = "grok"
-GROK_DETAIL_MODEL = "grok-4-1-fast-reasoning"
+GROK_DETAIL_MODEL = "grok-4.3"
 FETCH_CONCURRENCY = 3
 
 COMPANY_PROFILE_GROK_SYSTEM = """You are a precise research assistant. You receive plain text extracted from web pages \
@@ -707,16 +707,16 @@ async def discover_company_profile(
             if snippet:
                 sources = [("duckduckgo_snippets", snippet)]
 
-    if sources:
-        grok_res = await _grok_synthesize_profile(name, official_website, sources, log_cb)
-        if grok_res.detail or grok_res.location or grok_res.size:
-            return grok_res
-        if (
-            len(sources) == 1
-            and sources[0][0] == "duckduckgo_snippets"
-            and sources[0][1]
-        ):
-            return CompanyProfileResult(detail=sources[0][1], source="duckduckgo")
+    # if sources:
+    #     grok_res = await _grok_synthesize_profile(name, official_website, sources, log_cb)
+    #     if grok_res.detail or grok_res.location or grok_res.size:
+    #         return grok_res
+    #     if (
+    #         len(sources) == 1
+    #         and sources[0][0] == "duckduckgo_snippets"
+    #         and sources[0][1]
+    #     ):
+    #         return CompanyProfileResult(detail=sources[0][1], source="duckduckgo")
 
     async with httpx.AsyncClient(**ddg_client_kwargs) as ddg_client:
         ddg_relaxed = await _fetch_snippets_duckduckgo(

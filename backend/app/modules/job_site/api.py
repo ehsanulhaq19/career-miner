@@ -45,7 +45,7 @@ async def get_job_site_endpoint(
     return await get_job_site(db, job_site_id, user_id=current_user.id)
 
 
-@router.post("/", response_model=JobSiteResponse, status_code=201)
+@router.post("", response_model=JobSiteResponse, status_code=201)
 async def create_job_site_endpoint(
     job_site_create: JobSiteCreate,
     db: AsyncSession = Depends(get_db),

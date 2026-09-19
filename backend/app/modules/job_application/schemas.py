@@ -88,10 +88,10 @@ class BulkJobApplicationEmailSendRequest(BaseModel):
 
     job_application_ids: list[int]
     min_similarity_score: float | None = Field(
-        default=None,
+        default=80.0,
         ge=0,
         le=100,
-        description="If set, only send for applications with similarity_score >= this value (0–100).",
+        description="Only send for applications with similarity_score >= this value (0–100).",
     )
 
 
@@ -173,6 +173,27 @@ class BulkJobApplicationEmailSendLogListResponse(BaseModel):
     """Schema for list of bulk job application email send logs."""
 
     items: list[BulkJobApplicationEmailSendLogResponse]
+
+
+class BulkJobApplicationReportEmailLogResponse(BaseModel):
+    """Schema for bulk job application report email log response data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bulk_job_application_report_email_id: int
+    action: str
+    progress: int
+    status: str
+    details: str | None
+    meta_data: dict
+    created_at: datetime
+
+
+class BulkJobApplicationReportEmailLogListResponse(BaseModel):
+    """Schema for list of bulk job application report email logs."""
+
+    items: list[BulkJobApplicationReportEmailLogResponse]
 
 
 class JobApplicationListResponse(BaseModel):

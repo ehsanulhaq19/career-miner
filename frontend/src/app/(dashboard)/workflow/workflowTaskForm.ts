@@ -3,6 +3,7 @@ export const WORKFLOW_TASK_MODELS = [
   "ScrapClientJob",
   "BulkJobApplication",
   "BulkJobApplicationEmailSend",
+  "BulkJobApplicationReportEmail",
 ] as const;
 
 export type TaskModelType = (typeof WORKFLOW_TASK_MODELS)[number];
@@ -38,6 +39,11 @@ export interface WorkflowTaskRowForm {
   use_previous_job_applications: boolean;
   /** Only for BulkJobApplicationEmailSend; empty = no minimum filter (same as backend null). */
   bulk_email_min_similarity_input: string;
+  /** Only for BulkJobApplicationReportEmail */
+  send_to_email: string;
+  use_execution_bulk_jobs: boolean;
+  use_previous_bulk_job_applications: boolean;
+  bulk_job_application_ids_input: string;
 }
 
 export function defaultRowForModel(model: TaskModelType): WorkflowTaskRowForm {
@@ -66,7 +72,11 @@ export function defaultRowForModel(model: TaskModelType): WorkflowTaskRowForm {
     use_previous_career_jobs: false,
     job_application_ids_selected: [],
     use_previous_job_applications: false,
-    bulk_email_min_similarity_input: "",
+    bulk_email_min_similarity_input: "80",
+    send_to_email: "",
+    use_execution_bulk_jobs: true,
+    use_previous_bulk_job_applications: false,
+    bulk_job_application_ids_input: "",
   };
 }
 
@@ -134,10 +144,8 @@ export function rowToPayload(row: WorkflowTaskRowForm): Record<string, unknown> 
     case "BulkJobApplicationEmailSend": {
       const withMin = (base: Record<string, unknown>) => {
         const raw = row.bulk_email_min_similarity_input.trim();
-        if (raw !== "") {
-          const n = Number(raw);
-          if (!Number.isNaN(n)) base.min_similarity_score = n;
-        }
+        const n = raw !== "" ? Number(raw) : 80;
+        if (!Number.isNaN(n)) base.min_similarity_score = n;
         return base;
       };
       if (row.use_previous_job_applications) {
@@ -146,6 +154,28 @@ export function rowToPayload(row: WorkflowTaskRowForm): Record<string, unknown> 
       return withMin({
         job_application_ids: row.job_application_ids_selected,
       });
+    }
+    case "BulkJobApplicationReportEmail": {
+      const out: Record<string, unknown> = {
+        send_to_email: row.send_to_email.trim(),
+      };
+      if (row.use_previous_bulk_job_applications) {
+        out.use_previous_bulk_job_applications = true;
+      } else {
+        const rawIds = row.bulk_job_application_ids_input
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const parsedIds = rawIds
+          .map((s) => Number(s))
+          .filter((n) => !Number.isNaN(n) && n > 0);
+        if (parsedIds.length > 0) {
+          out.bulk_job_application_ids = parsedIds;
+        } else {
+          out.use_execution_bulk_jobs = row.use_execution_bulk_jobs;
+        }
+      }
+      return out;
     }
   }
 }
@@ -180,6 +210,13 @@ export function validateRow(row: WorkflowTaskRowForm): string | null {
         const n = Number(raw);
         if (Number.isNaN(n) || n < 0 || n > 100)
           return "Minimum similarity must be a number between 0 and 100.";
+      }
+      return null;
+    }
+    case "BulkJobApplicationReportEmail": {
+      const email = row.send_to_email.trim();
+      if (!email || !email.includes("@")) {
+        return "Enter a valid send-to email address.";
       }
       return null;
     }
@@ -249,6 +286,23 @@ export function hydrateRowFromPayload(
     row.job_application_ids_selected = numArray(d.job_application_ids);
     if (typeof d.min_similarity_score === "number")
       row.bulk_email_min_similarity_input = String(d.min_similarity_score);
+    return row;
+  }
+
+  if (linked_task_model === "BulkJobApplicationReportEmail") {
+    if (typeof d.send_to_email === "string") row.send_to_email = d.send_to_email;
+    row.use_previous_bulk_job_applications = Boolean(
+      d.use_previous_bulk_job_applications
+    );
+    const ids = numArray(d.bulk_job_application_ids);
+    if (ids.length > 0) {
+      row.bulk_job_application_ids_input = ids.join(", ");
+      row.use_execution_bulk_jobs = false;
+    } else if (typeof d.use_execution_bulk_jobs === "boolean") {
+      row.use_execution_bulk_jobs = d.use_execution_bulk_jobs;
+    } else {
+      row.use_execution_bulk_jobs = !row.use_previous_bulk_job_applications;
+    }
     return row;
   }
 

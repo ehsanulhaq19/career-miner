@@ -32,6 +32,7 @@ class LinkedTaskModelName(str, enum.Enum):
     SCRAP_CLIENT_JOB = "ScrapClientJob"
     BULK_JOB_APPLICATION = "BulkJobApplication"
     BULK_JOB_APPLICATION_EMAIL_SEND = "BulkJobApplicationEmailSend"
+    BULK_JOB_APPLICATION_REPORT_EMAIL = "BulkJobApplicationReportEmail"
 
 
 class Workflow(Base):

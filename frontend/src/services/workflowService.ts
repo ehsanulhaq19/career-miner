@@ -182,6 +182,7 @@ export const workflowService = {
     const { data } = await api.post<{
       status: string;
       workflow_id: number;
+      execution_id: number;
       from_priority: number;
       source_execution_id?: number;
     }>(`/workflows/${workflowId}/run-from-priority`, body);

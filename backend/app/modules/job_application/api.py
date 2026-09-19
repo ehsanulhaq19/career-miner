@@ -28,6 +28,7 @@ from app.modules.job_application.service import (
     create_live_job_application_flow,
     get_bulk_job_application_logs,
     get_bulk_job_application_email_send_logs,
+    get_bulk_job_application_report_email_logs,
     get_job_application,
     get_job_application_dates_grouped,
     get_job_application_email_logs,
@@ -289,7 +290,7 @@ async def get_bulk_job_application_logs_endpoint(
 @router.get("/bulk-email/fetch", response_model=JobApplicationListResponse)
 async def list_job_applications_for_bulk_email_endpoint(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
-    min_similarity_score: float = Query(0, ge=0, le=100),
+    min_similarity_score: float = Query(80, ge=0, le=100),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -357,6 +358,20 @@ async def get_bulk_job_application_email_send_logs_endpoint(
     """
     return await get_bulk_job_application_email_send_logs(
         db, bulk_id, current_user.id
+    )
+
+
+@router.get("/bulk-report/{report_id}/logs")
+async def get_bulk_job_application_report_email_logs_endpoint(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retrieve logs for a bulk job application report email run.
+    """
+    return await get_bulk_job_application_report_email_logs(
+        db, report_id, current_user.id
     )
 
 
